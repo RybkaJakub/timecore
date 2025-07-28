@@ -1,0 +1,9 @@
+.env
+# Never commit build artifacts or binaries
+node_modules/
+*.log
+dist/
+*.app
+*.exe
+*.dmg
+*.asar

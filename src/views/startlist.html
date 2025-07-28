@@ -1,0 +1,93 @@
+<div class="p-6">
+
+  <h2 class="text-3xl font-bold mb-6 text-white flex items-center gap-2">
+    🏁 Startovní listina
+  </h2>
+
+  <div class="flex flex-wrap items-center gap-3 mb-6">
+    <select id="categorySelect" class="p-2 rounded bg-gray-800 text-white border border-gray-600 hover:border-blue-500 transition">
+      <option value="">Vyber kategorii</option>
+    </select>
+
+    <select id="laneCountSelect" class="p-2 rounded bg-gray-800 text-white border border-gray-600 hidden hover:border-blue-500 transition">
+      <option value="1">1 dráha</option>
+      <option value="2">2 dráhy</option>
+      <option value="3">3 dráhy</option>
+      <option value="4">4 dráhy</option>
+      <option value="5">5 drah</option>
+      <option value="6">6 drah</option>
+    </select>
+
+    <button id="addStartlistEntryBtn" class="hidden bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow transition">
+      ➕ Přidat závodníka
+    </button>
+
+    <button id="addTeamBtn" class="hidden bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow transition">
+      ➕ Přidat tým
+    </button>
+
+    <button id="generateStartlistBtn" class="hidden bg-yellow-500 hover:bg-yellow-600 text-black px-4 py-2 rounded shadow transition">
+      ⚙️ Generovat startovku
+    </button>
+
+    <button id="importCsvBtn" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded shadow transition">
+      ⬇️ Import CSV
+    </button>
+
+    <button id="importExcelBtn" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded shadow transition">
+      ⬇️ Import Excel
+    </button>
+
+    <button id="exportExcelBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded shadow transition">
+      ⬆️ Export Excel
+    </button>
+
+    <button id="exportPdfBtn" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded shadow transition">
+      ⬆️ Export PDF
+    </button>
+  </div>
+
+  <div class="overflow-x-auto rounded-lg shadow border border-gray-700">
+    <table class="min-w-full divide-y divide-gray-700 bg-gray-900 text-sm text-white">
+      <thead id="startlistHead" class="bg-gray-800 text-gray-300 uppercase tracking-wider text-xs"></thead>
+      <tbody id="startlistRows"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Modal: Přidání závodníka -->
+<div id="modal-add-runner" class="modal hidden fixed inset-0 bg-black bg-opacity-80 flex justify-center items-center z-50">
+  <div class="bg-gray-800 p-6 rounded-lg w-full max-w-md shadow-lg">
+    <h3 class="text-xl font-semibold text-white mb-4">➕ Přidat závodníka</h3>
+
+    <input type="text" id="runnerName" class="w-full p-2 mb-3 rounded bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Jméno">
+    <input type="text" id="runnerSurname" class="w-full p-2 mb-3 rounded bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Příjmení">
+    <input type="text" id="runnerTeam" class="w-full p-2 mb-3 rounded bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Tým">
+
+    <div class="flex justify-end gap-3 mt-4">
+      <button id="cancelRunnerBtn" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded transition">Zrušit</button>
+      <button id="saveRunnerBtn" class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded transition">Uložit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Přidání týmu -->
+<div id="modal-add-team" class="modal hidden fixed inset-0 bg-black bg-opacity-80 flex justify-center items-center z-50">
+  <div class="bg-gray-800 p-6 rounded-lg w-full max-w-md shadow-lg">
+    <h3 class="text-xl font-semibold text-white mb-4">➕ Přidat tým</h3>
+
+    <input type="text" id="teamName" class="w-full p-2 mb-3 rounded bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Název týmu">
+    <input type="text" id="teamStartPosition" class="w-full p-2 mb-3 rounded bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Startovní pořadí">
+
+    <div class="flex justify-end gap-3 mt-4">
+      <button id="cancelTeamBtn" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded transition">Zrušit</button>
+      <button id="saveTeamBtn" class="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded transition">Uložit</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .modal.hidden {
+    display: none;
+  }
+</style>
