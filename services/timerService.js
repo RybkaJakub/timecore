@@ -83,7 +83,25 @@ exports.closeTimer = () => {
 };
 
 exports.sendToTimer = (data) => {
-  if (globalPort) {
-    globalPort.write(data + "\n");
+  console.log('[sendToTimer] Posílám:', data);
+  if (!globalPort) {
+    console.error('[sendToTimer] globalPort není definovaný');
+    return;
+  }
+
+  console.log('[sendToTimer] globalPort.path:', globalPort.path);
+  console.log('[sendToTimer] globalPort.isOpen:', globalPort.isOpen);
+
+  if (globalPort.isOpen) {
+    globalPort.write(data + '\n', (err) => {
+      if (err) {
+        console.error('[sendToTimer] Chyba při zápisu:', err.message);
+      } else {
+        console.log('[sendToTimer] Úspěšně odesláno');
+      }
+    });
+  } else {
+    console.error('[sendToTimer] Port není otevřený');
   }
 };
+

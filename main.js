@@ -1,10 +1,12 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const csvParse = require('csv-parse/sync');
 const xlsx = require('xlsx');
 const puppeteer = require('puppeteer');
 const { SerialPort } = require('serialport');
+const Store = require('electron-store');
+const store = new Store();
 
 const competitionsService = require('./services/competitionsService');
 const startlistService = require('./services/startlistService');
@@ -21,6 +23,7 @@ function createSplashWindow() {
     transparent: true,
     alwaysOnTop: true,
     resizable: false,
+    icon: path.join(__dirname, 'src', 'assets', 'logo.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -37,9 +40,13 @@ function createSplashWindow() {
 }
 
 function createMainWindow() {
+  const { width, height } = screen.getPrimaryDisplay().bounds;
+
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: width,
+    height: height,
+    x: 0,
+    y: 0,
     icon: path.join(__dirname, 'src', 'assets', 'logo.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -49,8 +56,23 @@ function createMainWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
-  mainWindow.webContents.openDevTools();
 }
+
+const sqlite3 = require('sqlite3').verbose();
+
+const dbPath = path.join(__dirname, './database/timecore.db');
+console.log('DB PATH:', dbPath);
+const db = new sqlite3.Database(dbPath);
+
+ipcMain.handle('deleteCompetition', async (e, id) => {
+  db.prepare('DELETE FROM competitions WHERE id = ?').run(id);
+});
+
+ipcMain.handle('updateCompetition', async (e, comp) => {
+  db.prepare('UPDATE competitions SET name = ?, date = ?, time = ?, type = ? WHERE id = ?')
+    .run(comp.name, comp.date, comp.time, comp.type, comp.id);
+});
+
 
 app.whenReady().then(createSplashWindow);
 
@@ -139,12 +161,13 @@ ipcMain.handle('importStartlistCsv', async (e, competitionId, categoryId, discip
     let surname = null;
     let team = null;
 
+    // Převod českých hlaviček na vnitřní pole
     if (discipline === 'Požární útok') {
-      team = row.team;
+      team = row['Tým'] || row['team'];
     } else {
-      name = row.name;
-      surname = row.surname;
-      team = row.team;
+      name = row['Jméno'] || row['name'];
+      surname = row['Příjmení'] || row['surname'];
+      team = row['Tým'] || row['team'];
     }
 
     await new Promise((resolve, reject) => {
@@ -164,6 +187,7 @@ ipcMain.handle('importStartlistCsv', async (e, competitionId, categoryId, discip
   }
   return true;
 });
+
 
 // IMPORT EXCEL
 ipcMain.handle('importStartlistExcel', async (e, competitionId, categoryId, discipline) => {
@@ -369,28 +393,52 @@ ipcMain.handle('generateStartlist', async (e, competitionId, categoryId, discipl
   return new Promise((resolve, reject) => {
     startlistService.getStartlist(competitionId, categoryId, (err, rows) => {
       if (err) return reject(err);
-
-      if (discipline === 'Požární útok') {
-        return resolve(true);
-      }
+      if (discipline === 'Požární útok') return resolve(true);
 
       const runners = [...rows];
-      const heats = [];
+      const teamQueues = {};
 
-      while (runners.length > 0) {
+      // Rozdělíme závodníky do front podle týmů
+      for (const r of runners) {
+        if (!teamQueues[r.team]) teamQueues[r.team] = [];
+        teamQueues[r.team].push(r);
+      }
+
+      // Sloučíme závodníky do jednoho frontu tak, aby byly týmy od sebe
+      const finalQueue = [];
+      let roundRobinTeams = Object.keys(teamQueues);
+      while (roundRobinTeams.length > 0) {
+        const nextTeams = [];
+        for (const team of roundRobinTeams) {
+          const runner = teamQueues[team].shift();
+          if (runner) finalQueue.push(runner);
+          if (teamQueues[team].length > 0) nextTeams.push(team);
+        }
+        roundRobinTeams = nextTeams;
+      }
+
+      // Rozdělení do heatů bez stejných týmů
+      const heats = [];
+      while (finalQueue.length > 0) {
         const heat = [];
         const usedTeams = new Set();
+        let i = 0;
 
-        for (let i = 0; i < lanes && runners.length > 0; i++) {
-          let idx = runners.findIndex(r => !usedTeams.has(r.team));
-
-          if (idx === -1) {
-            idx = 0;
+        while (heat.length < lanes && i < finalQueue.length) {
+          const runner = finalQueue[i];
+          if (!usedTeams.has(runner.team)) {
+            heat.push(runner);
+            usedTeams.add(runner.team);
+            finalQueue.splice(i, 1);
+          } else {
+            i++;
           }
+        }
 
-          const runner = runners.splice(idx, 1)[0];
-          usedTeams.add(runner.team);
-          heat.push(runner);
+        // fallback: pokud heat není plný, doplň zbytkem
+        i = 0;
+        while (heat.length < lanes && finalQueue.length > 0) {
+          heat.push(finalQueue.splice(0, 1)[0]);
         }
 
         heats.push(heat);
@@ -418,6 +466,7 @@ ipcMain.handle('generateStartlist', async (e, competitionId, categoryId, discipl
   });
 });
 
+
 ipcMain.handle('listSerialPorts', async () => {
   const ports = await SerialPort.list();
   console.log(ports)
@@ -442,6 +491,7 @@ ipcMain.handle('openSerialPort', async (e, portPath) => {
 
 
 ipcMain.handle('sendToSerialPort', async (e, data) => {
+  console.log('IPC přijato:', data);
   timerService.sendToTimer(data);
 });
 
@@ -458,3 +508,125 @@ ipcMain.handle('getResultsForCategory', async (e, competitionId, categoryId) => 
 ipcMain.handle('closeSerialPort', async () => {
   timerService.closeTimer();
 });
+
+let resultsWindow = null;
+
+ipcMain.handle('openResultsWindow', async (e, displayIndex) => {
+  const displays = screen.getAllDisplays();
+  const display = displays[displayIndex] || displays[0];
+
+  if (resultsWindow) {
+    resultsWindow.close();
+    resultsWindow = null;
+    return { closed: true };
+  }
+
+  resultsWindow = new BrowserWindow({
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
+    fullscreen: true,
+    frame: false,
+    webPreferences: {
+  preload: path.join(__dirname, 'preload.js'),
+  contextIsolation: true,
+  nodeIntegration: false
+}
+  });
+
+  resultsWindow.loadFile(path.join(__dirname, 'src', 'views', 'results.html'));
+
+  resultsWindow.on('closed', () => {
+    resultsWindow = null;
+  });
+
+  return { opened: true };
+});
+
+ipcMain.handle('getDisplays', () => {
+  return screen.getAllDisplays().map((d, i) => ({
+    id: i,
+    name: `Monitor ${i + 1} (${d.bounds.width}×${d.bounds.height})`,
+  }));
+});
+
+
+ipcMain.handle('getMeasurementResults', async () => {
+  const competitionId = store.get('selectedCompetitionId');
+  const categoryId = store.get('selectedCategoryId');
+  const discipline = store.get('selectedDiscipline');
+
+  if (!competitionId || !categoryId) return { results: [], category: 'Neznámá' };
+
+  const categoryName = await new Promise((resolve) => {
+    startlistService.getCategoryById(categoryId, (err, category) => {
+      if (err) {
+        console.error('CATEGORY LOAD FAIL:', err);
+        return resolve('Neznámá');
+      }
+      resolve(category?.name || 'Neznámá');
+    });
+  });
+
+  return new Promise((resolve, reject) => {
+    startlistService.getStartlist(competitionId, categoryId, async (err, rows) => {
+      if (err) {
+        console.error('GET STARTLIST ERROR:', err);
+        return reject(err);
+      }
+
+      const startlistIds = rows.map(r => r.id);
+      if (!startlistIds.length) return resolve({ results: [], category: categoryName, discipline });
+
+      try {
+        // Získáme výsledky pro dané startlist ID
+        const results = await new Promise((res, rej) => {
+          startlistService.getResultsByStartlistIds(startlistIds, (err, resultRows) => {
+            if (err) {
+              console.error('RESULTS LOAD FAIL:', err);
+              return res([]); // vrať prázdné pole místo err
+            }
+            res(resultRows);
+          });
+        });
+
+        const resultMap = {};
+        results.forEach(r => {
+          resultMap[r.startlist_id] = r;
+        });
+
+        const merged = rows.map(row => {
+          const result = resultMap[row.id] || {};
+          return {
+            ...row,
+            time_first: result.time_first ?? null,
+            time_second: result.time_second ?? null,
+            time_lp: result.time_lp ?? null,
+            time_pp: result.time_pp ?? null,
+            final_time: result.final_time ?? null,
+          };
+        });
+
+        merged.sort((a, b) => (a.start_number ?? 9999) - (b.start_number ?? 9999));
+
+        resolve({
+          category: categoryName,
+          results: merged,
+          discipline,
+        });
+      } catch (e) {
+        console.error('MERGE FAIL:', e);
+        reject(e);
+      }
+    });
+  });
+});
+
+
+
+ipcMain.handle('storeSet', (e, key, value) => {
+  store.set(key, value);
+});
+
+

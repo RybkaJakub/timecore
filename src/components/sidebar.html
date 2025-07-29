@@ -1,10 +1,21 @@
-<div id="sidebar" class="w-64 bg-gray-800 p-4 flex flex-col space-y-2 transition-all duration-300">
-  <button id="sidebarToggle" class="text-white mb-4">
-    ☰
-  </button>
-  <div id="logo" class="mb-4 text-primary font-bold text-xl">TimeCore</div>
-  <a href="#" data-view="dashboard" class="sidebar-link hover:bg-primary p-2 rounded">Dashboard</a>
-  <a href="#" data-view="startlist" class="sidebar-link hover:bg-primary p-2 rounded hidden">Startovní listina</a>
-  <a href="#" data-view="measurement" class="sidebar-link hover:bg-primary p-2 rounded hidden">Měření</a>
-  <a href="#" data-view="results" class="sidebar-link hover:bg-primary p-2 rounded hidden">Výsledky</a>
+<div id="sidebar" class="w-64 bg-gray-800 p-4 flex flex-col justify-between transition-all duration-300">
+  <div>
+    <button id="sidebarToggle" class="text-white mb-4">
+      ☰
+    </button>
+    <div id="logo" class="mb-4 text-primary font-bold text-xl">TimeCore</div>
+
+    <a href="#" data-view="dashboard" class="sidebar-link flex items-center gap-2 p-2 rounded hover:bg-primary">
+      📊 <span class="link-text">Informace o soutěži</span>
+    </a>
+    <a href="#" data-view="startlist" class="sidebar-link flex items-center gap-2 p-2 rounded hover:bg-primary hidden">
+      📋 <span class="link-text">Startovní listina</span>
+    </a>
+    <a href="#" data-view="measurement" class="sidebar-link flex items-center gap-2 p-2 rounded hover:bg-primary hidden">
+      ⏱️ <span class="link-text">Měření</span>
+    </a>
+    <a href="#" data-view="results" class="sidebar-link flex items-center gap-2 p-2 rounded hover:bg-primary hidden">
+      🏁 <span class="link-text">Výsledky</span>
+    </a>
+  </div>
 </div>

@@ -120,6 +120,12 @@ exports.getStartlist = (competitionId, categoryId, callback) => {
     });
 };
 
+exports.getCategoryById = (id, callback) => {
+db.get('SELECT id, name FROM categories WHERE id = ?', [id], (err, row) => {
+    if (err) return callback(err);
+    callback(null, row);
+  });
+}
 exports.saveResult = (payload) => {
     return new Promise((resolve, reject) => {
       const {
@@ -141,10 +147,10 @@ exports.saveResult = (payload) => {
       if (discipline === 'Požární útok') {
         sql = `
           INSERT INTO results
-            (startlist_id, time_lp, time_pp, is_n)
-          VALUES (?, ?, ?, ?)
+            (startlist_id, time_lp, time_pp, is_n, final_time)
+          VALUES (?, ?, ?, ?, ?)
         `;
-        values = [startlist_id, time_lp, time_pp, is_n ? 1 : 0];
+        values = [startlist_id, time_lp, time_pp, is_n ? 1 : 0, final_time];
   
       } else if (discipline === 'Běh') {
         sql = `
@@ -184,17 +190,6 @@ exports.getResults = (competitionId, categoryId, callback) => {
         if (err) return callback(err, []);
         callback(null, rows);
     });
-};
-
-exports.getCategoriesByDiscipline = (discipline, callback) => {
-    db.all(
-        `SELECT * FROM categories WHERE discipline = ?`,
-        [discipline],
-        (err, rows) => {
-            if (err) return callback(err, []);
-            callback(null, rows);
-        }
-    );
 };
 
 exports.updateStartlistEntry = (id, updatedFields) => {
@@ -237,4 +232,10 @@ exports.getResultsForCategory = (competitionId, categoryId) => {
       });
     });
   };
-  
+
+
+exports.getResultsByStartlistIds = (startlistIds, callback) => {
+  const placeholders = startlistIds.map(() => '?').join(',');
+  const sql = `SELECT * FROM results WHERE startlist_id IN (${placeholders})`;
+  db.all(sql, startlistIds, callback);
+}

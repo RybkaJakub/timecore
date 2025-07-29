@@ -1,2 +1,24 @@
-<h1 class="text-3xl font-bold text-primary mb-6">Dashboard</h1>
-<p>Vítejte v aplikaci TimeCore. Vyberte stránku z menu.</p>
+<div id="competitionInfo" class="bg-gray-800 p-6 rounded-xl shadow-lg text-white space-y-4 hidden border border-primary animate-fadeIn">
+  <h2 class="text-2xl font-bold text-primary flex items-center gap-2">
+    🏁 Základní informace o soutěži
+  </h2>
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-base">
+    <div class="flex items-center gap-3">
+      <span class="text-xl">🏷️</span>
+      <div><span class="text-gray-400">Název:</span> <strong id="infoName" class="text-white"></strong></div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-xl">📅</span>
+      <div><span class="text-gray-400">Datum:</span> <strong id="infoDate" class="text-white"></strong></div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-xl">⏰</span>
+      <div><span class="text-gray-400">Čas:</span> <strong id="infoTime" class="text-white"></strong></div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-xl">📌</span>
+      <div><span class="text-gray-400">Typ:</span> <strong id="infoType" class="text-white"></strong></div>
+    </div>
+  </div>
+</div>
