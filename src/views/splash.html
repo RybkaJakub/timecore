@@ -6,13 +6,13 @@
   <link href="../output.css" rel="stylesheet">
   <title>Načítání</title>
 </head>
-<body class="bg-gradient-to-br from-gray-800 to-gray-900 flex justify-center items-center min-h-screen text-gray-200">
+<body class="bg-gradient-to-br from-gray-800 to-gray-900 flex justify-center items-center min-h-screen text-gray-200 relative">
 
   <div class="flex flex-col items-center space-y-6">
     <!-- Logo -->
-    <img 
-      src="../assets/logo.png" 
-      alt="Logo" 
+    <img
+      src="../assets/logo.png"
+      alt="Logo"
       class="h-24 brightness-125 drop-shadow-lg"
     />
 
@@ -25,10 +25,12 @@
     <div class="w-64 h-3 bg-gray-700 rounded-full overflow-hidden shadow-inner">
       <div class="h-full bg-primary animate-loading rounded-full"></div>
     </div>
-    <p class="text-sm font-light tracking-wide text-gray-200"></p>
-      Verze 1 - BETA
-    </p>
   </div>
+
+  <!-- Verze dole -->
+  <p class="absolute bottom-4 text-xs text-gray-400 text-center w-full">
+    Verze 1 – BETA
+  </p>
 
 </body>
 </html>
