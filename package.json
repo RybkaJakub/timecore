@@ -5,7 +5,9 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "build:css": "tailwindcss -i ./src/styles.css -o ./src/output.css --watch"
+    "build:css": "tailwindcss -i ./src/styles.css -o ./src/output.css --watch",
+    "build": "electron-builder",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "better-sqlite3": "^12.2.0",
@@ -14,15 +16,35 @@
     "pdfkit": "^0.17.1",
     "puppeteer": "^24.12.0",
     "serialport": "^13.0.0",
-    "sqlite3": "^5.1.2",
+    "sqlite3": "^5.1.7",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.21",
     "electron": "^37.2.0",
+    "electron-builder": "^24.13.1",
+    "electron-rebuild": "^3.2.9",
     "electron-reload": "^2.0.0-alpha.1",
     "postcss": "^8.4.32",
     "tailwindcss": "^4.1.11",
     "tailwindcss-cli": "^0.1.2"
+  },
+  "build": {
+    "appId": "cz.timecore.app",
+    "productName": "TimeCore",
+    "files": [
+      "**/*"
+    ],
+    "directories": {
+      "buildResources": "assets"
+    },
+    "win": {
+  "target": "nsis",
+  "signingHashAlgorithms": [],
+  "sign": false,
+      "icon": "src/assets/logo-icon"
+},
+    "cscLink": null,
+    "cscKeyPassword": null
   }
 }

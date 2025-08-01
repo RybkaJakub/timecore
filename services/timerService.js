@@ -42,16 +42,14 @@ exports.openTimer = (portPath, onData) => {
       let t2 = null;
 
       if (pocetDrah >= 1) {
-        const low = packet[7];
-        const high = packet[8];
-        t1 = (low + high * 256) * 0.001;
-      }
+  const t1_raw = packet.readUIntLE(7, 3); // bajty 7, 8, 9
+  t1 = t1_raw / 1000;
+}
 
-      if (pocetDrah >= 2) {
-        const low2 = packet[11];
-        const high2 = packet[12];
-        t2 = (low2 + high2 * 256) * 0.001;
-      }
+if (pocetDrah >= 2) {
+  const t2_raw = packet.readUIntLE(11, 3); // bajty 11, 12, 13
+  t2 = t2_raw / 1000;
+}
 
       const result = {
         stav,
@@ -80,6 +78,7 @@ exports.closeTimer = () => {
   }
 
   globalPort.close()
+  globalPort = null;
 };
 
 exports.sendToTimer = (data) => {

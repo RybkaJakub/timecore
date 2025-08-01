@@ -45,6 +45,7 @@ function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: width,
     height: height,
+    // autoHideMenuBar: true,
     x: 0,
     y: 0,
     icon: path.join(__dirname, 'src', 'assets', 'logo.png'),
@@ -60,8 +61,8 @@ function createMainWindow() {
 
 const sqlite3 = require('sqlite3').verbose();
 
-const dbPath = path.join(__dirname, './database/timecore.db');
-console.log('DB PATH:', dbPath);
+const userDataPath = app.getPath('userData');
+const dbPath = path.join(userDataPath, 'database.db');
 const db = new sqlite3.Database(dbPath);
 
 ipcMain.handle('deleteCompetition', async (e, id) => {
@@ -160,10 +161,12 @@ ipcMain.handle('importStartlistCsv', async (e, competitionId, categoryId, discip
     let name = null;
     let surname = null;
     let team = null;
+    let start_number = null;
 
     // Převod českých hlaviček na vnitřní pole
     if (discipline === 'Požární útok') {
       team = row['Tým'] || row['team'];
+      start_number = row['Startovní číslo'] || row['start_number'];
     } else {
       name = row['Jméno'] || row['name'];
       surname = row['Příjmení'] || row['surname'];
@@ -171,19 +174,20 @@ ipcMain.handle('importStartlistCsv', async (e, competitionId, categoryId, discip
     }
 
     await new Promise((resolve, reject) => {
-      startlistService.addStartlistEntry({
-        name,
-        surname,
-        team,
-        lane: null,
-        heat: null,
-        competition_id: competitionId,
-        category_id: categoryId
-      }, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+  startlistService.addStartlistEntry({
+    name,
+    surname,
+    team,
+    start_number,
+    lane: null,
+    heat: null,
+    competition_id: competitionId,
+    category_id: categoryId
+  }, (err, result) => {
+    if (err) reject(err);
+    else resolve(result); // ← `result.id` teď obsahuje vložené ID
+  });
+});
   }
   return true;
 });

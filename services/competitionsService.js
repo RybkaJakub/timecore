@@ -1,10 +1,12 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const { app } = require('electron');
 
-const dbPath = path.join(__dirname, '../database/timecore.db');
-console.log('DB PATH:', dbPath);
+const userDataPath = app.getPath('userData');
+const dbPath = path.join(userDataPath, 'database.db');
 const db = new sqlite3.Database(dbPath);
 
+console.log(dbPath);
 
 db.serialize(() => {
   db.run(`

@@ -131,6 +131,7 @@ function renderCompetitionList(competitions) {
                 item.classList.add('opacity-0', 'transition-opacity', 'duration-300');
 
                 setTimeout(async () => {
+                    item.remove();
                     await window.electron.invoke('deleteCompetition', c.id);
 
                     // Aktualizuj data z DB
@@ -158,6 +159,7 @@ function renderCompetitionList(competitions) {
                         localStorage.removeItem('selectedCompetitionName');
                         updateSelectedCompetitionLabel();
                     }
+                    await loadCompetitions();
 
                     showToast(`Soutěž "${c.name}" byla úspěšně smazána ✅`);
                 }, 300); // počkej na animaci
@@ -176,8 +178,8 @@ function editCompetition(comp) {
     document.getElementById('editCompDate').value = comp.date || '';
     document.getElementById('editCompTime').value = comp.time || '';
     document.getElementById('editCompType').value = comp.type || '';
-    document.getElementById('editCompetitionModal')?.classList.add('hidden');
-    document.getElementById('editCreateCompetitionModal')?.classList.remove('hidden');
+    document.getElementById('competitionModal')?.classList.add('hidden');
+    document.getElementById('editCompetitionModal')?.classList.remove('hidden');
     const cancelBtn = document.getElementById('cancelCreateComp');
     if (cancelBtn) {
         cancelBtn.addEventListener('click', () => {
@@ -195,14 +197,21 @@ function editCompetition(comp) {
 
         if (!name) return alert('Zadej název.');
 
+
         await window.electron.invoke('updateCompetition', {
             id: comp.id,
             name, date, time, type
         });
+        localStorage.setItem('selectedCompetitionId', comp.id);
+        localStorage.setItem('selectedCompetitionName', name);
+        document.getElementById('editCompetitionModal').classList.add('hidden');
+        document.getElementById('competitionModal')?.classList.add('hidden'); // zavře i ten hlavní
+        await loadCompetitions(); // znovu načti soutěže
+        updateSelectedCompetitionLabel(); // aktualizuj text
+        loadView('dashboard');
 
-        document.getElementById('editCompetitionModal')?.classList.add('hidden');
-        await openCompetitionModal();
-        updateSelectedCompetitionLabel();
+        clearCompetitionForm();
+
     };
 }
 
@@ -358,7 +367,6 @@ function attachNavbarListeners() {
     const createBtn = document.getElementById('createCompetitionBtn');
     const cancelBtn = document.getElementById('cancelCreateComp');
     const saveBtn = document.getElementById('saveCreateComp');
-    const themeToggle = document.getElementById('themeToggle');
 
     if (createBtn) {
         createBtn.addEventListener('click', () => {
@@ -386,6 +394,8 @@ function attachNavbarListeners() {
 
             const result = await window.electron.invoke('createCompetition', {name, date, time, type});
 
+            console.log(`Result: ${result}`);
+
             if (result?.id) {
                 localStorage.setItem('selectedCompetitionId', result.id);
                 localStorage.setItem('selectedCompetitionName', name);
@@ -397,17 +407,8 @@ function attachNavbarListeners() {
                 loadView('dashboard');
             }
 
-
             clearCompetitionForm();
             document.getElementById('createCompetitionModal').classList.add('hidden');
-        });
-    }
-
-    if (themeToggle) {
-        themeToggle.addEventListener('click', () => {
-            const isDark = document.documentElement.classList.toggle('dark');
-            localStorage.setItem('theme', isDark ? 'dark' : 'light');
-            updateThemeIcon(isDark);
         });
     }
 }
@@ -533,11 +534,6 @@ async function loadCategoriesForSelectedCompetition() {
 
     tbody.innerHTML = '';
     thead.innerHTML = '';
-}
-
-function clearStartlist() {
-    const tbody = document.getElementById('startlistRows');
-    if (tbody) tbody.innerHTML = '';
 }
 
 function attachStartlistListeners() {
@@ -929,6 +925,18 @@ function attachStartlistListeners() {
     }
 }
 
+function showModal(message) {
+    const modal = document.getElementById('customModal');
+    const messageElem = document.getElementById('customModalMessage');
+    messageElem.textContent = message;
+    modal.classList.remove('hidden');
+}
+
+document.getElementById('customModalCloseBtn').addEventListener('click', () => {
+    document.getElementById('customModal').classList.add('hidden');
+});
+
+
 async function getCurrentDiscipline() {
     const competitionId = localStorage.getItem('selectedCompetitionId');
     const comp = window.allCompetitions.find(c => c.id == competitionId);
@@ -955,12 +963,6 @@ async function loadMeasurementCategories() {
         opt.textContent = cat.name;
         sel.appendChild(opt);
     });
-
-    // OPRAVA – rovnou vyvolá change
-    if (categories.length > 0) {
-        sel.value = categories[0].id;
-        sel.dispatchEvent(new Event('change'));
-    }
 
     sel.addEventListener('change', async (e) => {
         const catId = e.target.value;
@@ -1074,16 +1076,16 @@ function loadResultsCategories() {
 }
 
 async function loadDisplays() {
-  const displays = await window.electron.invoke('getDisplays');
-  const select = document.getElementById('displaySelect');
-  select.innerHTML = '';
+    const displays = await window.electron.invoke('getDisplays');
+    const select = document.getElementById('displaySelect');
+    select.innerHTML = '';
 
-  displays.forEach(display => {
-    const option = document.createElement('option');
-    option.value = display.id;
-    option.textContent = display.name;
-    select.appendChild(option);
-  });
+    displays.forEach(display => {
+        const option = document.createElement('option');
+        option.value = display.id;
+        option.textContent = display.name;
+        select.appendChild(option);
+    });
 }
 
 
@@ -1150,9 +1152,9 @@ async function attachMeasurementListeners() {
     });
 
     document.getElementById('stopResetBtn')?.addEventListener('click', () => {
-  window.electron.invoke('sendToSerialPort', 'RST');
-  window.electron.invoke('sendToSerialPort', 'RST');
-});
+        window.electron.invoke('sendToSerialPort', 'RST');
+        window.electron.invoke('sendToSerialPort', 'RST');
+    });
 
 
     window.electron.on('timer-data', async (e, payload) => {
@@ -1164,7 +1166,6 @@ async function attachMeasurementListeners() {
 
         const lp = payload.times[0] !== null ? `${payload.times[0].toFixed(3)} s` : "---";
         const pp = payload.times[1] !== null ? `${payload.times[1].toFixed(3)} s` : "---";
-
 
 
         if (timerDisplay) {
