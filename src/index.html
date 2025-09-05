@@ -6,7 +6,17 @@
   <link href="./output.css" rel="stylesheet">
   <title>TimeCore</title>
 </head>
-<body class="bg-gray-900 text-white min-h-screen h-screen flex flex-col">
+<style>
+  /* aby vnořené layouty mohly správně počítat výšku */
+  #main-content { min-height: 0; }
+  #main-content > .page-root { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .table-container { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  .table-scroll { border-collapse: separate; border-spacing: 0; width: 100%; }
+  .table-scroll thead, .table-scroll tbody tr { display: table; width: 100%; table-layout: fixed; }
+  .table-scroll thead th { position: sticky; top: 0; z-index: 2; background:#374151; }
+  .table-scroll tbody { display:block; max-height:100%; overflow-y:auto; }
+</style>
+<body class="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
 <div id="toastContainer" class="fixed top-5 right-5 z-50 space-y-2"></div>
 
   <!-- TOP NAVBAR -->
@@ -75,7 +85,7 @@
 
   <div class="flex flex-1 min-h-0">
     <div id="sidebar-container" class="flex-shrink-0"></div>
-    <main id="main-content" class="flex-1 overflow-auto p-6"></main>
+    <main id="main-content" class="flex-1 overflow-hidden p-6 flex flex-col min-h-0"></main>
   </div>
 
   <!-- MODAL: VYTVOŘIT SOUTĚŽ -->

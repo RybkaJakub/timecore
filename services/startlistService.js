@@ -112,15 +112,44 @@ exports.addStartlistEntry = (entry, callback) => {
 };
 
 exports.getStartlist = (competitionId, categoryId, callback) => {
-    db.all(`
-    SELECT * FROM startlist
-    WHERE competition_id = ? AND category_id = ?
-    ORDER BY lane
-  `, [competitionId, categoryId], (err, rows) => {
-        if (err) return callback(err, []);
-        callback(null, rows);
-    });
+  const sql = `
+    SELECT
+      s.*,
+      COALESCE(
+        json_group_array(
+          json_object(
+            'id', r.id,
+            'startlist_id', r.startlist_id,
+            'time_first', r.time_first,
+            'time_second', r.time_second,
+            'is_n_first', r.is_n_first,
+            'is_n_second', r.is_n_second,
+            'final_time', r.final_time,
+            'place', r.place,
+            'time_lp', r.time_lp,
+            'time_pp', r.time_pp,
+            'is_n', r.is_n
+          )
+        ),
+        '[]'
+      ) AS results
+    FROM startlist s
+    LEFT JOIN results r ON r.startlist_id = s.id
+    WHERE s.competition_id = ? AND s.category_id = ?
+    GROUP BY s.id
+    ORDER BY s.lane
+  `;
+
+  db.all(sql, [competitionId, categoryId], (err, rows) => {
+    if (err) return callback(err, []);
+    for (const row of rows) {
+      try { row.results = JSON.parse(row.results || '[]'); }
+      catch { row.results = []; }
+    }
+    callback(null, rows);
+  });
 };
+
 
 exports.getCategoryById = (id, callback) => {
 db.get('SELECT id, name FROM categories WHERE id = ?', [id], (err, row) => {
@@ -128,58 +157,162 @@ db.get('SELECT id, name FROM categories WHERE id = ?', [id], (err, row) => {
     callback(null, row);
   });
 }
+
 exports.saveResult = (payload) => {
-    return new Promise((resolve, reject) => {
-      const {
-        startlist_id,
-        discipline,
-        time_lp,
-        time_pp,
-        is_n,
-        time_first,
-        time_second,
-        is_n_first,
-        is_n_second,
-        final_time,
-        place
-      } = payload;
-  
-      let sql, values;
-  
-      if (discipline === 'Požární útok') {
-        sql = `
-          INSERT INTO results
-            (startlist_id, time_lp, time_pp, is_n, final_time)
-          VALUES (?, ?, ?, ?, ?)
-        `;
-        values = [startlist_id, time_lp, time_pp, is_n ? 1 : 0, final_time];
-  
-      } else if (discipline === 'Běh') {
-        sql = `
-          INSERT INTO results
-            (startlist_id, time_first, time_second, is_n_first, is_n_second, final_time, place)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `;
-        values = [
-          startlist_id,
-          time_first,
-          time_second,
-          is_n_first ? 1 : 0,
-          is_n_second ? 1 : 0,
-          final_time,
-          place
-        ];
-      } else {
-        return reject(new Error("Neznámá disciplína"));
-      }
-  
-      db.run(sql, values, function (err) {
+  return new Promise((resolve, reject) => {
+    const {
+      startlist_id,
+      discipline,
+      time_lp,
+      time_pp,
+      is_n,
+      time_first,
+      time_second,
+      is_n_first,
+      is_n_second,
+      final_time,
+      place
+    } = payload;
+
+    if (!startlist_id) return reject(new Error('startlist_id je povinné'));
+
+    const toNum = v => {
+      if (v === '' || v === null || v === undefined) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;   // nikdy nevracej NaN
+    };
+
+    if (discipline === 'Požární útok') {
+      const lp = toNum(time_lp);
+      const pp = toNum(time_pp);
+      const n  = is_n ? 1 : 0;
+
+      const finalPU = n
+        ? 999.999
+        : ([lp, pp].filter(v => v != null).length ? Math.max(lp ?? -Infinity, pp ?? -Infinity) : 999.999);
+
+      db.get(`SELECT id FROM results WHERE startlist_id = ?`, [startlist_id], (err, row) => {
         if (err) return reject(err);
-        resolve({ id: this.lastID });
+
+        if (row) {
+          const sql = `
+            UPDATE results
+            SET time_lp = ?, time_pp = ?, is_n = ?, final_time = ?, place = COALESCE(?, place)
+            WHERE id = ?
+          `;
+          const values = [lp, pp, n, finalPU, place ?? null, row.id];
+          console.log('[DB] UPDATE results ->', values);
+          db.run(sql, values, function (uErr) {
+            if (uErr) return reject(uErr);
+            return resolve({ success: true, id: row.id, updated: true, final_time: finalPU });
+          });
+          return;
+        }
+
+        const insertSql = `
+          INSERT INTO results (startlist_id, time_lp, time_pp, is_n, final_time, place)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `;
+        const insertValues = [startlist_id, lp, pp, n, finalPU, place ?? null];
+        console.log('[DB] INSERT results ->', insertValues);
+        db.run(insertSql, insertValues, function (iErr) {
+          if (iErr) return reject(iErr);
+          return resolve({ success: true, id: this.lastID, inserted: true, final_time: finalPU });
+        });
       });
-    });
-  };
-  
+
+      return; // ⬅ důležité
+    }
+
+    if (discipline === 'Běh') {
+      const computeFinal = (t1, n1, t2, n2) => {
+        const v1 = (n1 ? null : toNum(t1));
+        const v2 = (n2 ? null : toNum(t2));
+        if (v1 == null && v2 == null) return 999.999;
+        if (v1 == null) return v2;
+        if (v2 == null) return v1;
+        return Math.min(v1, v2);
+      };
+
+      db.get(
+        `SELECT id, time_first, time_second, is_n_first, is_n_second FROM results WHERE startlist_id = ?`,
+        [startlist_id],
+        (err, row) => {
+          if (err) return reject(err);
+
+          if (row && (time_second !== undefined && time_second !== null)) {
+            const newTimeSecond = toNum(time_second);
+            const newIsNSecond = is_n_second ? 1 : 0;
+
+            const currentFirst = toNum(row.time_first);
+            const currentIsN1 = row.is_n_first ? 1 : 0;
+
+            const newFinal = computeFinal(currentFirst, currentIsN1, newTimeSecond, newIsNSecond);
+
+            const sql = `
+              UPDATE results
+              SET time_second = ?, is_n_second = ?, final_time = ?, place = COALESCE(?, place)
+              WHERE id = ?
+            `;
+            const values = [newTimeSecond, newIsNSecond, newFinal, place ?? null, row.id];
+            console.log('[DB] UPDATE běh-2 ->', values);
+            return db.run(sql, values, function (uErr) {
+              if (uErr) return reject(uErr);
+              return resolve({ success: true, id: row.id, updated: true, which: 'second', final_time: newFinal });
+            });
+          }
+
+          if (row && (time_first !== undefined && time_first !== null)) {
+            const newTimeFirst = toNum(time_first);
+            const newIsNFirst = is_n_first ? 1 : 0;
+
+            const currentSecond = toNum(row.time_second);
+            const currentIsN2 = row.is_n_second ? 1 : 0;
+
+            const newFinal = computeFinal(newTimeFirst, newIsNFirst, currentSecond, currentIsN2);
+
+            const sql = `
+              UPDATE results
+              SET time_first = ?, is_n_first = ?, final_time = ?, place = COALESCE(?, place)
+              WHERE id = ?
+            `;
+            const values = [newTimeFirst, newIsNFirst, newFinal, place ?? null, row.id];
+            console.log('[DB] UPDATE běh-1 ->', values);
+            return db.run(sql, values, function (uErr) {
+              if (uErr) return reject(uErr);
+              return resolve({ success: true, id: row.id, updated: true, which: 'first', final_time: newFinal });
+            });
+          }
+
+          const t1 = toNum(time_first);
+          const n1 = is_n_first ? 1 : 0;
+          const t2 = toNum(time_second);
+          const n2 = is_n_second ? 1 : 0;
+          const final = (t1 !== null || t2 !== null)
+            ? computeFinal(t1, n1, t2, n2)
+            : (toNum(final_time));
+
+          const insertSql = `
+            INSERT INTO results (startlist_id, time_first, time_second, is_n_first, is_n_second, final_time, place)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `;
+          const insertValues = [startlist_id, t1, t2, n1, n2, final, place ?? null];
+          console.log('[DB] INSERT běh ->', insertValues);
+          return db.run(insertSql, insertValues, function (iErr) {
+            if (iErr) return reject(iErr);
+            return resolve({ success: true, id: this.lastID, inserted: true, final_time: final });
+          });
+        }
+      );
+
+      return;
+    }
+
+    // neznámá disciplína
+    reject(new Error('Neznámá discipline: ' + discipline));
+  });
+};
+
 
 exports.getResults = (competitionId, categoryId, callback) => {
     db.all(`

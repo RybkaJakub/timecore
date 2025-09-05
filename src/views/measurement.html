@@ -1,8 +1,50 @@
-<div class="p-6 space-y-8">
+<div class="pl-6 pr-6 mb-6 space-y-8">
   <style>
     .highlighted {
-      background-color: black;
+      background: linear-gradient(to right, rgba(59,130,246,0.18), rgba(59,130,246,0.06));
+      border-left: 4px solid #3b82f6;
+      box-shadow: inset 0 0 8px rgba(59,130,246,0.3);
+      transition: background 0.3s ease, box-shadow 0.3s ease;
     }
+    .highlighted td {
+      font-weight: 600;
+      color: #f3f4f6; /* Tailwind gray-100 */
+    }
+    .highlighted:hover {
+      background: linear-gradient(to right, rgba(37,99,235,0.25), rgba(37,99,235,0.1));
+      box-shadow: inset 0 0 10px rgba(37,99,235,0.4);
+    }
+
+    /* horizontální scroll podle tutoriálu */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #374151; /* gray-700 */
+  border-radius: .5rem;
+}
+
+/* sticky header + vertikální scroll jen v řádcích */
+.table-scroll {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed; /* všechny sloupce mají přesně danou šířku */
+}
+.table-scroll thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.table-scroll th,
+.table-scroll td {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.table-scroll tbody { display: block; max-height: 48vh; overflow-y: auto; }
+.table-scroll tbody::-webkit-scrollbar { width: 10px; }
+.table-scroll tbody::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 6px; }
+.table-scroll tbody::-webkit-scrollbar-track { background: #1f2937; }
+
   </style>
 
   <!-- Nadpis a tlačítko pro výsledky -->
@@ -32,14 +74,33 @@
   </div>
 
   <!-- Log -->
-  <div class="bg-black text-green-400 p-3 rounded-md h-36 overflow-y-auto text-xs font-mono border border-gray-700" id="serialLog"></div>
+  <!-- <div class="bg-black text-green-400 p-3 rounded-md h-36 overflow-y-auto text-xs font-mono border border-gray-700" id="serialLog"></div> -->
 
   <!-- Timer display -->
-  <div class="flex justify-center mt-4">
-    <div id="timerDisplay" class="text-6xl font-bold text-white tracking-wider bg-gray-800 px-8 py-4 rounded shadow-inner border border-gray-700">
-      00.000
+  <!-- Timer display -->
+<div class="flex justify-center mt-4">
+  <div id="timerDisplay" class="text-6xl font-bold text-white tracking-wider bg-gray-800 px-8 py-4 rounded shadow-inner border border-gray-700">
+
+    <!-- Požární útok -->
+    <div class="flex items-center justify-center gap-8 utok hidden">
+      <div class="text-center">
+        <div class="text-xs text-gray-400 mb-1">LP</div>
+        <div class="text-5xl font-bold text-green-400 lpTime">-</div>
+      </div>
+      <div class="text-center">
+        <div class="text-xs text-gray-400 mb-1">PP</div>
+        <div class="text-5xl font-bold text-blue-400 ppTime">-</div>
+      </div>
     </div>
+
+    <!-- Běh -->
+    <div class="flex items-center justify-center gap-6 beh hidden">
+      <!-- sem dáváš obsah pro běh -->
+    </div>
+
   </div>
+</div>
+
 
   <!-- Výběry -->
   <div class="flex flex-wrap items-center gap-4">
@@ -50,24 +111,22 @@
       <select id="heatSelect" class="bg-gray-800 text-white p-2 rounded border border-gray-600 focus:ring-2 focus:ring-blue-500"></select>
     </div>
 
-    <div id="laneContainer" class="hidden flex items-center gap-2">
-      <label for="laneCountSelect" class="text-gray-300 text-sm">Počet drah:</label>
-      <select id="laneCountSelect" class="bg-gray-800 text-white p-2 rounded border border-gray-600 focus:ring-2 focus:ring-blue-500">
+    <div id="attemptContainer" class="hidden flex items-center gap-2">
+      <label for="attemptSelect" class="text-gray-300 text-sm">Pokus:</label>
+      <select id="attemptSelect" class="bg-gray-800 text-white p-2 rounded border border-gray-600 focus:ring-2 focus:ring-blue-500">
         <option value="1">1</option>
         <option value="2">2</option>
-        <option value="3">3</option>
-        <option value="4">4</option>
       </select>
     </div>
   </div>
 
   <!-- Startovní listina -->
-  <div class="overflow-x-auto rounded border border-gray-700 shadow">
-    <table class="min-w-full divide-y divide-gray-700 bg-gray-800 rounded shadow text-sm">
-      <thead id="measurementHead" class="bg-gray-700 text-gray-300 uppercase text-xs"></thead>
-      <tbody id="measurementRows" class="divide-y divide-gray-600"></tbody>
-    </table>
-  </div>
+  <div class="table-wrap shadow">
+  <table class="table-scroll bg-gray-800 text-sm divide-y divide-gray-700">
+    <thead id="measurementHead" class="text-gray-300 uppercase text-xs"></thead>
+    <tbody id="measurementRows" class="divide-y divide-gray-600"></tbody>
+  </table>
+</div>
 
   <!-- Uložení výsledků -->
   <div class="space-y-4">
@@ -78,6 +137,9 @@
       </label>
       <button id="saveResultBtn" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded shadow transition">
         💾 Uložit výsledek (Požární útok)
+      </button>
+      <button id="removeResultBtn" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded shadow transition">
+        🗑️ Smazat výsledky
       </button>
     </div>
 

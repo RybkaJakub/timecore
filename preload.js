@@ -8,3 +8,16 @@ contextBridge.exposeInMainWorld('electron', {
   },
   on: (...args) => ipcRenderer.on(...args)
 });
+
+
+contextBridge.exposeInMainWorld('api', {
+  // vrátí Promise<boolean>, ale interně používá .send / .once
+  checkLicense(key) {
+    return new Promise((resolve) => {
+      ipcRenderer.once('license-result', (_ev, ok) => resolve(ok));
+      ipcRenderer.send('check-license', key);
+    });
+  },
+  closeWindow: () => ipcRenderer.send('window-close'),
+  minimizeWindow: () => ipcRenderer.send('window-minimize'),
+});

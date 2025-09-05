@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="./license.css" />
+  <title>Aktivace TimeCore</title>
+</head>
+<body>
+  <main class="wrap">
+    <section class="card" role="dialog" aria-labelledby="title" aria-describedby="desc">
+      <!-- header -->
+      <div class="card__head">
+        <div class="brand">
+          <span class="brand__dot" aria-hidden="true"></span>
+          <span class="brand__name">TimeCore</span>
+          <span class="brand__divider">•</span>
+          <span class="brand__section">Aktivace</span>
+        </div>
+        <!-- volitelné lokální zavření okna -->
+        <button class="ghost close-btn" id="localClose" title="Zavřít">
+          ✕
+        </button>
+      </div>
+
+      <!-- content -->
+      <h1 id="title" class="title">Zadejte licenční klíč</h1>
+      <p id="desc" class="muted">Formát: <span class="mono">NAZEVSBORU-XXXX-XXXX</span></p>
+
+      <div class="input-row">
+        <span class="input-icon" aria-hidden="true">🔑</span>
+        <input id="keyInput" class="input"
+               placeholder="NAZEVSBORU-XXXX-XXXX"
+               autocomplete="off" spellcheck="false" />
+        <button id="submitBtn" class="btn btn--primary">Ověřit</button>
+      </div>
+
+      <div id="okMsg"  class="msg msg--ok"  hidden>✔ Licence ověřena. Spouštím aplikaci…</div>
+      <div id="errMsg" class="msg msg--err" hidden>✖ Neplatný licenční klíč.</div>
+
+      <footer class="card__foot">
+        <small>© 2025 Jakub Rybka</small>
+      </footer>
+    </section>
+  </main>
+
+  <!-- žádný inline JS kvůli CSP -->
+  <script src="../js/license.js"></script>
+</body>
+</html>

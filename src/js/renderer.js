@@ -1,6 +1,8 @@
 window.serialConnected = false;
 window.currentSelectedRowId = null;
 
+const toBool = v => v === true || v === 1 || v === '1' || v === 'true';
+
 // Funkce pro otevření modalu soutěží
 async function openCompetitionModal() {
     console.log("▶️ Otevírám modal soutěží");
@@ -268,13 +270,6 @@ async function loadSidebar() {
     document.getElementById('sidebar-container').innerHTML = sidebarHTML;
 }
 
-function applyTheme(theme) {
-    document.documentElement.setAttribute('data-theme', theme);
-
-    const icon = document.getElementById('themeIcon');
-    icon.textContent = theme === 'dark' ? '🌙' : '☀️';
-}
-
 function attachSidebarListeners() {
     const sidebar = document.getElementById('sidebar');
     const sidebarToggle = document.getElementById('sidebarToggle');
@@ -358,6 +353,8 @@ function loadView(viewName) {
             }
             if (viewName === 'dashboard') {
                 renderDashboardCompetitionInfo();
+                const element = document.querySelector('[data-view="dashboard"]');
+                setActiveLink(element);
             }
 
         });
@@ -550,6 +547,33 @@ function attachStartlistListeners() {
     const saveTeamBtn = document.getElementById('saveTeamBtn');
     const categorySelect = document.getElementById('categorySelect');
     const laneCountSelect = document.getElementById('laneCountSelect');
+
+    const searchInput = document.getElementById('searchStartlistInput');
+
+    let currentSearch = '';
+
+    const filterRows = () => {
+        const rows = document.querySelectorAll('#startlistRows tr');
+        rows.forEach(row => {
+            const text = row.innerText.toLowerCase();
+            if (text.includes(currentSearch.toLowerCase())) {
+                row.classList.remove('hidden');
+            } else {
+                row.classList.add('hidden');
+            }
+        });
+    };
+
+    if (searchInput) {
+        if (searchInput._listener) {
+            searchInput.removeEventListener('input', searchInput._listener);
+        }
+        searchInput._listener = (e) => {
+            currentSearch = e.target.value;
+            filterRows();
+        };
+        searchInput.addEventListener('input', searchInput._listener);
+    }
 
     if (importCsvBtn) {
         importCsvBtn.addEventListener('click', async () => {
@@ -925,13 +949,6 @@ function attachStartlistListeners() {
     }
 }
 
-function showModal(message) {
-    const modal = document.getElementById('customModal');
-    const messageElem = document.getElementById('customModalMessage');
-    messageElem.textContent = message;
-    modal.classList.remove('hidden');
-}
-
 document.getElementById('customModalCloseBtn').addEventListener('click', () => {
     document.getElementById('customModal').classList.add('hidden');
 });
@@ -980,7 +997,9 @@ async function loadMeasurementStartlist(competitionId, categoryId, discipline) {
     const tbody = document.getElementById('measurementRows');
     const thead = document.getElementById('measurementHead');
     const heatContainer = document.getElementById('heatContainer');
+    const attemptContainer = document.getElementById('attemptContainer');
     const heatSelect = document.getElementById('heatSelect');
+    const attemptSelect = document.getElementById('attemptSelect');
 
     tbody.innerHTML = '';
     thead.innerHTML = '';
@@ -991,36 +1010,145 @@ async function loadMeasurementStartlist(competitionId, categoryId, discipline) {
         document.getElementById('saveAttackContainer').classList.remove('hidden');
 
         heatContainer.classList.add('hidden');
+        attemptContainer.classList.add('hidden');
 
         thead.innerHTML = `
-      <tr class="bg-gray-700">
-        <th class="p-2 border border-gray-600">Startovní číslo</th>
-        <th class="p-2 border border-gray-600">Družstvo</th>
-        <th class="p-2 border border-gray-600">LP čas</th>
-        <th class="p-2 border border-gray-600">PP čas</th>
-        <th class="p-2 border border-gray-600">N</th>
-      </tr>
+      <tr class="bg-gray-700 text-gray-200 uppercase text-xs">
+      <th class="p-2 border border-gray-600 w-28">Start. č.</th>
+      <th class="p-2 border border-gray-600 w-64">Družstvo</th>
+      <th class="p-2 border border-gray-600 w-48">LP čas</th>
+      <th class="p-2 border border-gray-600 w-48">PP čas</th>
+      <th class="p-2 border border-gray-600 w-48">Výsledek</th>
+      <th class="p-2 border border-gray-600 w-48">Platný pokus</th>
+      <th class="w-1"></th>
+    </tr>
     `;
 
         rows.forEach(r => {
             const tr = document.createElement('tr');
-            tr.dataset.id = r.id;
+            const isN = !!r.results[0]?.is_n;
+            const valid = !isN;
+            tr.dataset.id = r.results[0].id;
+            tr.className = [
+                'h-10 leading-none transition-colors',
+                'hover:bg-gray-600/60'
+            ].join(' ');
             tr.innerHTML = `
-        <td>${r.start_number ?? ''}</td>
-        <td>${r.team ?? ''}</td>
-        <td class="lp-time"></td>
-        <td class="pp-time"></td>
+            <td class="p-2 border border-gray-600 text-center font-medium  w-28">${r.start_number ?? ''}</td>
+      <td class="p-2 border border-gray-600 w-64">
+        <div class="flex items-center gap-2">
+          <span class="font-semibold tracking-wide">${r.team ?? ''}</span>
+        </div>
+      </td>
+      <td class="p-2 border border-gray-600 text-center lp-time w-48" contenteditable="true">${r.results[0].time_lp ?? '-'}</td>
+      <td class="p-2 border border-gray-600 text-center pp-time w-48" contenteditable="true">${r.results[0].time_pp ?? '-'}</td>
+      <td class="p-2 border border-gray-600 text-center font-semibold result-time w-48">
+        ${r.results[0].final_time ?? '-'}
+      </td>
+      <td class="p-2 border border-gray-600 text-center font-semibold w-48">
+  ${
+    r.results[0].is_n != null
+      ? `<div class="flex justify-center">
+            <button 
+              class="validity-toggle-utok px-3 py-1 rounded text-white text-sm transition
+                ${valid ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}"
+              data-valid="${valid}"
+              data-index="${r.results[0].id}"
+            >
+              ${valid ? '✅ PLATNÝ' : '❌ NEPLATNÝ'}
+            </button>
+          </div>`
+      : '-'
+  }
+</td>
+
+
+        
       `;
+
             tbody.appendChild(tr);
         });
+
+        const patchResult = async (id, patch) => {
+  if (!Number.isFinite(id)) { console.error('Invalid id', id, patch); return; }
+  console.log('[IPC] updateResults ->', id, patch);
+  return await window.electron.invoke('updateResults', { id, ...patch });
+};
+
+// toggle platnosti
+document.getElementById('measurementRows')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.validity-toggle-utok');
+  if (!btn) return;
+
+  const tr = btn.closest('tr');
+  const id = Number(btn.dataset.index || tr?.dataset.id);
+  const wasValid = btn.dataset.valid === 'true';
+  const nowValid = !wasValid;
+
+  const res = await patchResult(id, { is_n: !nowValid });
+
+  btn.dataset.valid = String(nowValid);
+  btn.textContent = nowValid ? '✅ PLATNÝ' : '❌ NEPLATNÝ';
+  btn.classList.toggle('bg-green-600', nowValid);
+  btn.classList.toggle('hover:bg-green-700', nowValid);
+  btn.classList.toggle('bg-red-600', !nowValid);
+  btn.classList.toggle('hover:bg-red-700', !nowValid);
+
+  const finalEl = tr.querySelector('.result-time');
+  const newFinal = res?.updated?.final_time;
+  if (finalEl && newFinal != null) {
+    finalEl.textContent = Number(newFinal).toFixed(2);
+  }
+});
+
+// edit LP/PP – použij focusout (bublá)
+document.getElementById('measurementRows')?.addEventListener('focusout', async (e) => {
+  const td = e.target.closest('td.lp-time, td.pp-time');
+  if (!td) return;
+
+  const tr = td.closest('tr');
+  const id = Number(tr?.dataset.id);
+  const raw = (td.textContent || '').trim().toUpperCase().replace(',', '.');
+
+  let val = null;
+  if (raw && raw !== '-' && raw !== 'N') {
+    const num = Number(raw);
+    val = Number.isFinite(num) ? num : null;
+  }
+
+  const patch = td.classList.contains('lp-time') ? { time_lp: val } : { time_pp: val };
+  const res = await patchResult(id, patch);
+
+  td.textContent = val == null ? '-' : Number(val).toFixed(2);
+
+  const finalEl = tr.querySelector('.result-time');
+  const newFinal = res?.updated?.final_time;
+  if (finalEl && newFinal != null) {
+    finalEl.textContent =  Number(newFinal).toFixed(2);
+  }
+});
+
+// zabraň enteru v contenteditable dělat nový řádek a místo toho “blur”
+document.getElementById('measurementRows')?.addEventListener('keydown', (e) => {
+  const td = e.target.closest('td.lp-time, td.pp-time');
+  if (!td) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    td.blur();
+  }
+});
+
 
     } else {
         // Běh na 60m
         heatContainer.classList.remove('hidden');
+        attemptContainer.classList.remove('hidden');
+        const attempt = attemptSelect.value;
+        localStorage.setItem('attempt', attempt);
         document.getElementById('saveRunContainer').classList.remove('hidden');
 
         // Seznam unikátních rozběhů
-        const heats = [...new Set(rows.map(r => r.heat).filter(h => h !== null))];
+        const heats = [...new Set(rows.map(r => r.heat).filter(h => h !== null))].sort((a, b) => Number(a) - Number(b));
         heatSelect.innerHTML = heats
             .map(h => `<option value="${h}">Rozběh ${h}</option>`)
             .join('');
@@ -1032,8 +1160,16 @@ async function loadMeasurementStartlist(competitionId, categoryId, discipline) {
             showHeat(rows, heatSelect.value);
         });
 
+        if (attemptSelect) {
+            attemptSelect.addEventListener('change', (e) => {
+                const attempt = e.target.value;
+                localStorage.setItem('attempt', attempt);
+            });
+        }
+
         function showHeat(allRows, heat) {
             tbody.innerHTML = '';
+            thead.innerHTML = '';
             thead.innerHTML = `
         <tr>
           <th class="p-2">Rozběh</th>
@@ -1053,16 +1189,17 @@ async function loadMeasurementStartlist(competitionId, categoryId, discipline) {
                 .sort((a, b) => (a.lane || 0) - (b.lane || 0))
                 .forEach(r => {
                     const tr = document.createElement('tr');
+                    tr.dataset.id = r.id;
                     tr.innerHTML = `
-            <td class="p-2">${r.start_number ?? ''}</td>
-            <td class="p-2">${r.heat}</td>
+            <td class="p-2">${r.heat ?? ''}</td>
             <td class="p-2">${r.lane}</td>
+            <td class="p-2">${r.start_number}</td>
             <td class="p-2">${r.name ?? ''}</td>
             <td class="p-2">${r.surname ?? ''}</td>
             <td class="p-2">${r.team ?? ''}</td>
-            <td class="p-2 pp-time" data-id="${r.id}"></td>
-            <td class="p-2 lp-time" data-id="${r.id}"></td>
-            <td class="p-2 result-time" data-id="${r.id}"></td>
+            <td class="p-2 time-1 ${toBool(r.results[0].is_n_first) ? 'text-red-400 font-semibold' : ''}">${r.results[0].is_n_first ? `N (${r.results[0].time_first})` : (r.results[0].time_first ?? '')}</td>
+            <td class="p-2 time-2 ${toBool(r.results[0].is_n_second) ? 'text-red-400 font-semibold' : ''}">${r.results[0].is_n_second ? `N (${r.results[0].time_second})` : (r.results[0].time_second ?? '')}</td>
+            <td class="p-2 result-time ${toBool(r.results[0].is_n_first) && toBool(r.results[0].is_n_second) ? 'text-red-400 font-semibold' : ''}">${r.results[0].final_time ?? ''}</td>
           `;
                     tbody.appendChild(tr);
                 });
@@ -1088,20 +1225,20 @@ async function loadDisplays() {
     });
 }
 
+const laneValidityState = {};
 
 // ✅ UPRAVENÁ FUNKCE attachMeasurementListeners
 async function attachMeasurementListeners() {
     const serialSelect = document.getElementById('serialPortSelect');
     const connectBtn = document.getElementById('connectSerialBtn');
     const disconnectBtn = document.getElementById('disconnectBtn');
-    const serialLog = document.getElementById('serialLog');
 
     const ports = await window.electron.invoke('listSerialPorts');
 
     const toggleResultsBtn = document.getElementById('toggleResultsBtn');
     const displaySelect = document.getElementById('displaySelect');
 
-    loadDisplays();
+    await loadDisplays();
 
     toggleResultsBtn.addEventListener('click', async () => {
         const index = parseInt(displaySelect.value || 0);
@@ -1123,6 +1260,22 @@ async function attachMeasurementListeners() {
         serialSelect.appendChild(option);
     });
 
+    if (window.serialConnected) {
+        document.getElementById('serialStatus').textContent = "Připojeno";
+        document.getElementById('serialStatus').classList.remove('text-gray-300');
+        document.getElementById('serialStatus').classList.add('text-green-400');
+        connectBtn?.classList.add('hidden');
+        disconnectBtn?.classList.remove('hidden');
+        serialSelect?.classList.add('hidden');
+        const discipline = await getCurrentDiscipline();
+        console.log(discipline);
+        if (discipline === 'Požární útok') {
+            document.querySelector('.utok').classList.remove('hidden');
+        } else {
+            document.querySelector('.utok').classList.add('hidden');
+        }
+    }
+
     connectBtn?.addEventListener('click', async () => {
         const port = serialSelect?.value;
         if (!port) {
@@ -1137,7 +1290,13 @@ async function attachMeasurementListeners() {
         connectBtn?.classList.add('hidden');
         disconnectBtn?.classList.remove('hidden');
         serialSelect?.classList.add('hidden');
-        serialLog?.insertAdjacentHTML('beforeend', `<div>[INFO] Připojeno k ${port}</div>`);
+        const discipline = await getCurrentDiscipline();
+        console.log(discipline);
+        if (discipline === 'Požární útok') {
+            document.querySelector('.utok').classList.remove('hidden');
+        } else {
+            document.querySelector('.utok').classList.add('hidden');
+        }
     });
 
     disconnectBtn?.addEventListener('click', async () => {
@@ -1149,6 +1308,12 @@ async function attachMeasurementListeners() {
         disconnectBtn?.classList.add('hidden');
         connectBtn?.classList.remove('hidden');
         serialSelect?.classList.remove('hidden');
+        const discipline = await getCurrentDiscipline();
+        if (discipline === 'Požární útok') {
+            document.querySelector('.utok').classList.add('hidden')
+        } else {
+            document.querySelector('.utok').classList.add('hidden')
+        }
     });
 
     document.getElementById('stopResetBtn')?.addEventListener('click', () => {
@@ -1161,64 +1326,81 @@ async function attachMeasurementListeners() {
         console.log('DATA ZE ČASOMÍRY:', payload);
 
         const timerDisplay = document.getElementById('timerDisplay');
-        const row = document.querySelector('tr.highlighted');
         const discipline = await getCurrentDiscipline();
-
-        const lp = payload.times[0] !== null ? `${payload.times[0].toFixed(3)} s` : "---";
-        const pp = payload.times[1] !== null ? `${payload.times[1].toFixed(3)} s` : "---";
-
 
         if (timerDisplay) {
             if (discipline === 'Požární útok') {
-                timerDisplay.innerHTML = `
-          <div class="flex items-center justify-center gap-8">
-            <div class="text-center">
-              <div class="text-xs text-gray-400 mb-1">LP</div>
-              <div class="text-5xl font-bold text-green-400 lpTime">${lp}</div>
-            </div>
-            <div class="text-center">
-              <div class="text-xs text-gray-400 mb-1">PP</div>
-              <div class="text-5xl font-bold text-blue-400 ppTime">${pp}</div>
-            </div>
-          </div>
-        `;
+                const lp = payload.times[0] !== null || Number.isNaN(+t) ? `${payload.times[0].toFixed(3)} s` : "---";
+                const pp = payload.times[1] !== null || Number.isNaN(+t) ? `${payload.times[1].toFixed(3)} s` : "---";
+
+                const lpCell = document.querySelector('.lpTime');
+                const ppCell = document.querySelector('.ppTime');
+                if (lpCell) lpCell.textContent = lp
+                if (ppCell) ppCell.textContent = pp
             } else {
 
                 const activeRows = Array.from(document.querySelectorAll('#measurementRows tr')).filter(r => r.offsetParent !== null);
-                const drah = activeRows.length;
 
                 timerDisplay.innerHTML = `
   <div class="flex items-center justify-center gap-6">
     ${activeRows.map((r, i) => {
                     const time = payload.times[i] !== null ? `${payload.times[i].toFixed(3)} s` : "---";
+                    const valid = laneValidityState[i] !== false; // defaultně platný
                     return `
-        <div class="text-center">
+        <div class="text-center" data-lane="${i}">
           <div class="text-xs text-gray-400 mb-1">Dráha ${i + 1}</div>
           <div class="text-4xl font-bold text-yellow-400">${time}</div>
+          <button 
+            class="validity-toggle mt-2 px-3 py-1 rounded text-white text-sm transition
+              ${valid ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}"
+            data-valid="${valid}"
+            data-index="${i}"
+          >
+            ${valid ? '✅ PLATNÝ' : '❌ NEPLATNÝ'}
+          </button>
         </div>
       `;
                 }).join('')}
   </div>
 `;
+                document.querySelectorAll('.validity-toggle').forEach(btn => {
+                    const index = btn.dataset.index;
+                    btn.addEventListener('click', () => {
+                        const isValid = btn.dataset.valid === 'true';
+                        laneValidityState[index] = !isValid;
+                        btn.dataset.valid = (!isValid).toString();
+                        if (isValid) {
+                            btn.textContent = "❌ NEPLATNÝ";
+                            btn.classList.remove("bg-green-600", "hover:bg-green-700");
+                            btn.classList.add("bg-red-600", "hover:bg-red-700");
+                        } else {
+                            btn.textContent = "✅ PLATNÝ";
+                            btn.classList.remove("bg-red-600", "hover:bg-red-700");
+                            btn.classList.add("bg-green-600", "hover:bg-green-700");
+                        }
+                    });
+                });
+
+
+                const attempt = localStorage.getItem('attempt');
+                const laneCount = parseInt(localStorage.getItem('laneCount') || '1');
+                const rows = document.querySelectorAll('#measurementRows tr');
+
+                for (let i = 0; i < laneCount; i++) {
+
+                    const row = rows[i];
+                    if (!row) continue;
+
+                    const cell = row.querySelector(`td.${CSS.escape(`time-${attempt}`)}`)
+
+                    const time = payload.times[i]?.toFixed(3) || "---";
+
+                    if (cell) {
+                        cell.textContent = time !== null ? time : "---";
+                    }
+                }
 
             }
-        }
-
-        // Přímé propsání do tabulky (měřená řádka)
-        if (row) {
-            const lpCell = row.querySelector('.lp-time');
-            const ppCell = row.querySelector('.pp-time');
-            if (lpCell) lpCell.textContent = payload.times[0]?.toFixed(3) || "---";
-            if (ppCell) ppCell.textContent = payload.times[1]?.toFixed(3) || "---";
-        }
-    });
-
-
-    window.electron.on('serial-raw-line', (e, rawHex) => {
-        console.log('RAW SERIAL DATA:', rawHex);
-        if (serialLog) {
-            serialLog.insertAdjacentHTML('beforeend', `<div>[RAW] ${rawHex}</div>`);
-            serialLog.scrollTop = serialLog.scrollHeight;
         }
     });
 
@@ -1233,43 +1415,241 @@ async function attachMeasurementListeners() {
     });
 
     // SAVE button handler for Požární útok
-    document.getElementById('saveResultBtn')?.addEventListener('click', async () => {
+    // malý confirm modal (vrací true/false)
+    async function confirmDanger({
+                                     title = 'Změna výsledku',
+                                     message = 'Opravdu přepsat uložený výsledek? Tato akce je nevratná.',
+                                     ok = 'Ano, přepsat',
+                                     cancel = 'Zrušit'
+                                 } = {}) {
+        return new Promise(resolve => {
+            const wrap = document.createElement('div');
+            wrap.className = 'fixed inset-0 z-50 flex items-center justify-center';
+            wrap.innerHTML = `
+      <div class="absolute inset-0 bg-black/60"></div>
+      <div class="relative bg-gray-800 text-white rounded-lg shadow-xl w-full max-w-md p-6">
+        <h3 class="text-lg font-semibold mb-2">${title}</h3>
+        <p class="text-sm text-gray-300 mb-6">${message}</p>
+        <div class="flex justify-end gap-3">
+          <button class="btn-cancel px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded">${cancel}</button>
+          <button class="btn-ok px-4 py-2 bg-red-600 hover:bg-red-700 rounded">${ok}</button>
+        </div>
+      </div>`;
+            document.body.appendChild(wrap);
+            const done = v => {
+                wrap.remove();
+                resolve(v);
+            };
+            wrap.querySelector('.btn-cancel').addEventListener('click', () => done(false));
+            wrap.querySelector('.btn-ok').addEventListener('click', () => done(true));
+        });
+    }
+
+    document.getElementById('removeResultBtn')?.addEventListener('click', async () => {
         const competitionId = localStorage.getItem('selectedCompetitionId');
         const categoryId = document.getElementById('measurementCategory')?.value;
         if (!competitionId || !categoryId) return;
+
         const startlistId = window.currentSelectedRowId;
         if (!startlistId) return;
-        const time_pp_element = document.getElementsByClassName('ppTime')[0];
-        const time_pp = time_pp_element ? parseFloat(time_pp_element.textContent) : null;
-        const time_lp_element = document.getElementsByClassName('lpTime')[0];
-        const time_lp = time_lp_element ? parseFloat(time_lp_element.textContent) : null;
-        const isN = document.getElementById('nCheckbox')?.checked || false;
-        let final_time;
 
-        if (isN) {
-            final_time = 999.999;
-        } else {
-            final_time = time_pp > time_lp ? time_pp : time_lp;
+        // zjisti, jestli už něco v DB je
+        const existingMap = await window.electron.invoke('getResultsByStartlistIds', [startlistId]);
+        const existing = Array.isArray(existingMap)
+            ? existingMap[0]
+            : (existingMap?.[startlistId] ?? null);
+
+        const exists =
+            !!existing &&
+            (
+                existing.id != null ||
+                existing.time_lp != null ||
+                existing.time_pp != null ||
+                existing.final_time != null ||
+                existing.is_n != null
+            );
+
+        if (!exists) {
+            alert('Pro tento tým zatím není uložen žádný výsledek.');
+            return;
         }
 
-        await window.electron.invoke('saveResult', {
-            startlist_id: startlistId,
-            discipline: 'Požární útok',
-            time_lp: time_lp,
-            time_pp: time_pp,
-            is_n: isN,
-            final_time: final_time
+        const ok = await confirmDanger({
+            message: 'Pro tento tým už je uložen výsledek. Opravdu ho chceš nenávratně smazat?',
+            ok: 'Ano, smazat',
+            cancel: 'Ne, ponechat'
         });
+        if (!ok) return;
 
-        alert('Výsledek uložen!');
+        await window.electron.invoke('removeResult', {startlist_id: startlistId});
 
+        // posun na další řádek (komfort)
         const currentRow = document.querySelector(`tr[data-id="${startlistId}"]`);
         const nextRow = currentRow?.nextElementSibling;
         if (nextRow) {
-            document.querySelectorAll('#measurementRows tr')
-                .forEach(r => r.classList.remove('highlighted'));
+            document.querySelectorAll('#measurementRows tr').forEach(r => r.classList.remove('highlighted'));
             nextRow.classList.add('highlighted');
             window.currentSelectedRowId = nextRow.dataset.id;
         }
+
+        await loadMeasurementStartlist(competitionId, categoryId, 'Požární útok');
+        alert('Výsledek smazán.');
     });
+
+
+    document.getElementById('saveResultBtn')?.addEventListener('click', async () => {
+  const competitionId = localStorage.getItem('selectedCompetitionId');
+  const categoryId = document.getElementById('measurementCategory')?.value;
+  if (!competitionId || !categoryId) return;
+
+  console.log(competitionId);
+
+  const startlistId = window.currentSelectedRowId;
+  if (!startlistId) return;
+
+  const readNum = sel => {
+    const el = document.querySelector(sel);
+    if (!el) return null;
+    const raw = (el.textContent || '').trim().replace(',', '.');
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : null;
+  };
+
+  const time_lp = readNum('.lpTime');
+  const time_pp = readNum('.ppTime');
+  const vals = [time_lp, time_pp].filter(v => v != null);
+  const final_time = vals.length ? Math.max(...vals) : 999.999; // sjednoť na 999.999
+
+  let existing = null;
+  try {
+    const existingMap = await window.electron.invoke('getResultsByStartlistIds', [startlistId]);
+    existing = Array.isArray(existingMap) ? existingMap[0] : (existingMap?.[startlistId] ?? null);
+  } catch (e) {
+    console.warn('getResultsByStartlistIds selhalo:', e);
+  }
+
+  const exists = !!existing && (existing.id != null);
+
+  if (exists) {
+    const ok = await confirmDanger({
+      message: 'Pro tento tým už je uložen výsledek. Opravdu ho chceš přepsat?',
+      ok: 'Ano, přepsat',
+      cancel: 'Ne, ponechat'
+    });
+    if (!ok) return;
+  }
+
+  const payload = {
+    startlist_id: Number(startlistId),
+    discipline: 'Požární útok',
+    time_lp, time_pp,
+    final_time,
+    ...(existing?.id ? { id: existing.id } : {})
+  };
+
+  try {
+    const res = await window.electron.invoke('saveResult', payload);
+    console.log('[saveResult] payload:', payload, '-> response:', res);
+
+    if (!res?.success) {
+      alert('Uložení selhalo: ' + (res?.error || 'neznámá chyba'));
+      return;
+    }
+
+    // posun + reload
+    const currentRow = document.querySelector(`tr[data-id="${startlistId}"]`);
+    const nextRow = currentRow?.nextElementSibling;
+    if (nextRow) {
+      document.querySelectorAll('#measurementRows tr').forEach(r => r.classList.remove('highlighted'));
+      nextRow.classList.add('highlighted');
+      window.currentSelectedRowId = nextRow.dataset.id;
+    }
+
+    await loadMeasurementStartlist(competitionId, categoryId, 'Požární útok');
+    alert(exists ? 'Výsledek přepsán.' : 'Výsledek uložen.');
+  } catch (err) {
+    console.error('saveResult error:', err);
+    alert('Uložení selhalo (IPC). Mrkni do konzole.');
+  }
+});
+
+
+
+    document.getElementById('saveResult60mBtn')?.addEventListener('click', async () => {
+        const competitionId = localStorage.getItem('selectedCompetitionId');
+        const categoryId = document.getElementById('measurementCategory')?.value;
+        const attempt = localStorage.getItem('attempt'); // "1" | "2"
+        const laneCount = parseInt(localStorage.getItem('laneCount') || '1', 10);
+        const rows = document.querySelectorAll('#measurementRows tr');
+        if (!competitionId || !categoryId || !rows.length) return;
+
+
+        // 1) Přednačti existující výsledky z DB pro viditelné dráhy
+        const laneRows = [...Array(laneCount).keys()]
+            .map(i => rows[i])
+            .filter(Boolean);
+
+        const startlistIds = laneRows.map(r => r.dataset.id);
+        // pokud máš batch endpoint, použij ho; jinak per‑item:
+        const existingByStartlist = {};
+        for (const id of startlistIds) {
+            const existingByStartlist = await window.electron.invoke('getResultsByStartlistIds', startlistIds);
+            // očekává objekt { time_first, time_second, is_n_first, is_n_second } nebo null
+        }
+
+        const resultsToSave = [];
+
+        for (let i = 0; i < laneCount; i++) {
+            const row = rows[i];
+            if (!row) continue;
+
+            const startlistId = row.dataset.id;
+
+            const timeCell = row.querySelector(`td.time-${attempt}`);
+            const timeNow = timeCell ? parseFloat(timeCell.textContent) : null;
+
+            const validBtn = document.querySelector(`.validity-toggle[data-index="${i}"]`);
+            const isNNow = validBtn?.dataset.valid === 'false';
+
+            const attemptName = attempt === '1' ? 'first' : 'second';
+
+            // 2) Slož obě hodnoty (aktuální + z DB)
+            const existing = existingByStartlist[startlistId] || {};
+            const t1 = attempt === '1'
+                ? (isNNow ? null : timeNow)
+                : (toBool(existing.is_n_first) ? null : (existing.time_first != null ? Number(existing.time_first) : null));
+
+            const t2 = attempt === '2'
+                ? (isNNow ? null : timeNow)
+                : (toBool(existing.is_n_second) ? null : (existing.time_second != null ? Number(existing.time_second) : null));
+
+            let final_time;
+            if (t1 == null && t2 == null) {
+                final_time = '999.99';
+            } else if (t1 == null) {
+                final_time = t2.toFixed(2);
+            } else if (t2 == null) {
+                final_time = t1.toFixed(2);
+            } else {
+                final_time = Math.min(t1, t2).toFixed(2);
+            }
+
+            resultsToSave.push({
+                startlist_id: startlistId,
+                discipline: 'Běh',
+                [`time_${attemptName}`]: timeNow,
+                [`is_n_${attemptName}`]: isNNow,
+                final_time,
+            });
+            await loadMeasurementStartlist(competitionId, categoryId, 'Běh');
+        }
+
+        for (const result of resultsToSave) {
+            await window.electron.invoke('saveResult', result);
+        }
+
+        alert('Výsledky uloženy!');
+    });
+
+
 }

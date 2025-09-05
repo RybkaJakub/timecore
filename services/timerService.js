@@ -57,8 +57,6 @@ if (pocetDrah >= 2) {
         times: [t1, t2],
       };
 
-      console.log('Parsovaný packet:', result);
-
       onData(result, packet.toString('hex'));
 
       // Ořízni z bufferu tento packet

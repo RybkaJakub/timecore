@@ -1,4 +1,28 @@
-<div class="p-6">
+<div class="pl-6 pr-6 mb-6 space-y-8">
+  <style>
+    .table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #374151; /* gray-700 */
+  border-radius: .5rem;
+}
+
+/* sticky header + vertikální scroll jen v řádcích */
+.table-scroll {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+.table-scroll thead, .table-scroll tbody tr { display: table; width: 100%; table-layout: fixed; }
+.table-scroll thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: #374151; /* gray-700 */
+}
+.table-scroll tbody { display: block; max-height: 48vh; overflow-y: auto; }
+.table-scroll tbody::-webkit-scrollbar { width: 10px; }
+.table-scroll tbody::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 6px; }
+.table-scroll tbody::-webkit-scrollbar-track { background: #1f2937; }
+  </style>
   <h2 class="text-3xl font-bold mb-8 text-white flex items-center gap-3">
     🏁 <span class="text-primary">Startovní listina</span>
     <span class="text-sm bg-primary text-black px-3 py-1 rounded-full animate-pulse">LIVE</span>
@@ -54,15 +78,15 @@
       </button>
     </div>
     <div>
-  <input type="text" id="startlistSearch" placeholder="🔍 Hledat závodníka, tým..."
+  <input type="text" id="searchStartlistInput" placeholder="🔍 Hledat závodníka, tým..."
     class="w-full p-2 rounded bg-gray-800 text-white placeholder-gray-400 border border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
 </div>
   </div>
 
-  <div class="overflow-x-auto rounded-xl shadow border border-gray-700">
-    <table class="min-w-full divide-y divide-gray-700 bg-gray-900 text-sm text-white">
-      <thead id="startlistHead" class="bg-gray-800 text-gray-300 uppercase tracking-wider text-xs"></thead>
-      <tbody id="startlistRows"></tbody>
+  <div class="table-wrap shadow">
+    <table class="table-scroll bg-gray-800 text-sm divide-y divide-gray-700">
+      <thead id="startlistHead" class="text-gray-300 uppercase text-xs"></thead>
+      <tbody id="startlistRows" class="divide-y divide-gray-600"></tbody>
     </table>
   </div>
 </div>
