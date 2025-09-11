@@ -13,6 +13,7 @@
     "better-sqlite3": "^12.2.0",
     "csv-parse": "^5.6.0",
     "electron-store": "^8.1.0",
+    "exceljs": "^4.4.0",
     "pdfkit": "^0.17.1",
     "puppeteer": "^24.12.0",
     "serialport": "^13.0.0",
@@ -39,11 +40,11 @@
       "buildResources": "assets"
     },
     "win": {
-  "target": "nsis",
-  "signingHashAlgorithms": [],
-  "sign": false,
+      "target": "nsis",
+      "signingHashAlgorithms": [],
+      "sign": false,
       "icon": "src/assets/logo-icon"
-},
+    },
     "cscLink": null,
     "cscKeyPassword": null
   }

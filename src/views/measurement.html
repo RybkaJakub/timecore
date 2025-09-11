@@ -1,153 +1,240 @@
-<div class="pl-6 pr-6 mb-6 space-y-8">
+<div class="pl-6 pr-6 mb-6 space-y-8 page-root">
   <style>
-    .highlighted {
-      background: linear-gradient(to right, rgba(59,130,246,0.18), rgba(59,130,246,0.06));
-      border-left: 4px solid #3b82f6;
-      box-shadow: inset 0 0 8px rgba(59,130,246,0.3);
-      transition: background 0.3s ease, box-shadow 0.3s ease;
+    :root {
+      --bg:#0b1220; --panel:#0f172a; --muted:#94a3b8; --text:#e5e7eb;
+      --line:#1f2a44; --brand:#3b82f6; --good:#10b981; --warn:#eab308; --bad:#ef4444;
     }
-    .highlighted td {
-      font-weight: 600;
-      color: #f3f4f6; /* Tailwind gray-100 */
-    }
-    .highlighted:hover {
-      background: linear-gradient(to right, rgba(37,99,235,0.25), rgba(37,99,235,0.1));
-      box-shadow: inset 0 0 10px rgba(37,99,235,0.4);
+    [hidden]{display:none!important}
+
+    /* ---- PAGE LAYOUT (důležité) ---- */
+    #main-content{min-height:0;}
+    #main-content > .page-root{
+      display:grid;
+      grid-template-rows: auto auto auto auto 1fr auto; /* header, top panel, timer, výběry, TABULKA, akce */
+      height:100%;
+      min-height:0;
+      overflow:hidden;
+      gap:1.5rem;
     }
 
-    /* horizontální scroll podle tutoriálu */
-.table-wrap {
-  width: 100%;
-  overflow-x: auto;
-  border: 1px solid #374151; /* gray-700 */
-  border-radius: .5rem;
+    /* ---------- Cards / Panels ---------- */
+    .panel{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px}
+    .panel-tight{padding:10px}
+    .section-title{display:flex;align-items:center;gap:.6rem;color:#fff;font-weight:800;letter-spacing:.2px}
+
+    /* ---------- Buttons ---------- */
+    .btn{display:inline-flex;align-items:center;gap:.5rem;padding:.55rem .9rem;border-radius:.7rem;font-weight:700;color:#fff;transition:.15s ease;border:1px solid transparent}
+    .btn:focus{outline:none;box-shadow:0 0 0 3px #3b82f633}
+    .btn-primary{background:var(--brand)} .btn-primary:hover{background:#2563eb}
+    .btn-good{background:var(--good)} .btn-good:hover{background:#059669}
+    .btn-danger{background:var(--bad)} .btn-danger:hover{background:#dc2626}
+    .btn-ghost{background:#13203b;border-color:var(--line);color:#cbd5e1} .btn-ghost:hover{background:#1a2a4b}
+    .btn:disabled{opacity:.55;cursor:not-allowed}
+    .btn-icon{width:1.15rem;height:1.15rem;opacity:.9}
+
+    /* ---------- Inputs ---------- */
+    .input, .select {
+      background:#0b1326; border:1px solid var(--line); color:var(--text);
+      border-radius:.65rem; padding:.55rem .7rem; transition:.15s;
+    }
+    .input:focus, .select:focus{outline:none; box-shadow:0 0 0 3px #3b82f633}
+
+    /* ---------- Timer ---------- */
+    .timer-shell{
+      background:linear-gradient(180deg,#0f172a,#0b1220);
+      border:1px solid var(--line); border-radius:18px; padding:18px 26px;
+      box-shadow:inset 0 0 0 1px rgba(255,255,255,.03), 0 6px 24px rgba(0,0,0,.35);
+      color:#fff; letter-spacing:.04em;
+    }
+    .timer-big{font-size:56px; font-weight:800}
+    .laneBox{min-width:160px;background:#0b1326;border:1px solid var(--line);border-radius:14px;padding:10px 14px;text-align:center}
+    .laneLabel{font-size:.7rem;color:var(--muted);margin-bottom:.2rem}
+    .laneTime{font-size:40px;font-weight:800}
+    .laneTime.lp{color:#34d399} .laneTime.pp{color:#60a5fa}
+
+    /* ---------- Table (roste, uvnitř scroll) ---------- */
+    .table-region{min-height:0;}
+    .table-wrap{width:100%;height:100%;overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:#0b1326}
+    .table{border-collapse:separate;border-spacing:0;width:100%}
+    .table thead,.table tbody tr{display:table;width:100%;table-layout:fixed}
+    .table thead th{
+      position:sticky;top:0;z-index:2;background:#0f172a;color:#cbd5e1;
+      font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;
+      border-bottom:1px solid var(--line); padding:.6rem .75rem;
+    }
+
+    /* ---------- Utility ---------- */
+    .gap-6-4{row-gap:1rem;column-gap:1rem}
+
+    /* Badge: připojeno/nepřipojeno */
+    .status-pill{
+      display:inline-flex;align-items:center;gap:.35rem;
+      padding:.25rem .55rem;border-radius:9999px;
+      font-size:.75rem;font-weight:700;line-height:1;
+      border:1px solid transparent;color:#fff;
+    }
+    .status-pill.is-off{ background:#dc2626; border-color:#dc2626; }
+    .status-pill.is-on { background:#059669; border-color:#059669; }
+/* ---------- Table (roste, sticky header, scroll na wrapperu) ---------- */
+/* ---------- TABLE: sticky header + scroll na wrapperu + hezčí vzhled ---------- */
+
+/* region drží zbytek výšky v gridu */
+.table-region{ min-height:0; display:flex; }
+
+/* SKROLUJE WRAPPER (ne tbody) – sticky pak spolehlivě funguje */
+.table-wrap{
+  width:100%;
+  flex:1 1 auto;
+  max-height:100%;
+  overflow:auto;                       /* y i x */
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:#0b1326;
+
+  /* decentní scrollbar */
+  scrollbar-gutter: stable both-edges; /* méně cukání šířek */
+  scrollbar-width: thin;               /* Firefox */
+  scrollbar-color:#354263 transparent;
+}
+.table-wrap::-webkit-scrollbar{ width:12px; height:12px; }
+.table-wrap::-webkit-scrollbar-track{ background:transparent; }
+.table-wrap::-webkit-scrollbar-corner{ background:transparent; }
+.table-wrap::-webkit-scrollbar-thumb{
+  background:#27314a; border-radius:9999px; border:3px solid #0b1326;
+}
+.table-wrap:hover::-webkit-scrollbar-thumb{ background:#354263; }
+
+/* TABULKA – žádné „display:table“ hacky na thead/tbody */
+.table{ width:100%; border-collapse:separate; border-spacing:0; }
+
+/* HEAD: sticky na celý thead, ne jen th – Chromium to drží lépe */
+.table thead{ position:sticky; top:0; z-index:3; }
+.table thead th{
+  background:#0f172a; color:#cbd5e1;
+  font-size:.72rem; letter-spacing:.08em; text-transform:uppercase;
+  padding:.6rem .75rem;
+  border-bottom:1px solid var(--line);
+  box-shadow:0 1px 0 0 var(--line), 0 6px 12px rgba(0,0,0,.20);
 }
 
-/* sticky header + vertikální scroll jen v řádcích */
-.table-scroll {
-  border-collapse: collapse;
-  width: 100%;
-  table-layout: fixed; /* všechny sloupce mají přesně danou šířku */
+/* BODY */
+.table td{
+  padding:.55rem .75rem;
+  border-bottom:1px dashed rgba(148,163,184,.25);
+  color:#d1d5db;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
-.table-scroll thead {
-  position: sticky;
-  top: 0;
-  z-index: 2;
+.table tbody tr:nth-child(odd) td{ background:rgba(2,6,23,.18); }
+.table tbody tr:hover td{ background:rgba(59,130,246,.06); }
+
+/* VYBRANÝ ŘÁDEK – jasný, ale neřve */
+.table tbody tr.highlighted td{
+  background:linear-gradient(90deg, rgba(59,130,246,.20), rgba(59,130,246,.08)) !important;
+  color:#e5e7eb;
+  border-bottom-color:rgba(59,130,246,.45);
 }
-.table-scroll th,
-.table-scroll td {
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  overflow: hidden;
+.table tbody tr.highlighted td:first-child{ position:relative; }
+.table tbody tr.highlighted td:first-child::before{
+  content:""; position:absolute; left:0; top:0; bottom:0; width:3px;
+  background:var(--brand); border-top-left-radius:6px; border-bottom-left-radius:6px;
 }
-.table-scroll tbody { display: block; max-height: 48vh; overflow-y: auto; }
-.table-scroll tbody::-webkit-scrollbar { width: 10px; }
-.table-scroll tbody::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 6px; }
-.table-scroll tbody::-webkit-scrollbar-track { background: #1f2937; }
+.table tbody tr.highlighted:hover td{
+  background:linear-gradient(90deg, rgba(59,130,246,.26), rgba(59,130,246,.12)) !important;
+}
+
 
   </style>
 
-  <!-- Nadpis a tlačítko pro výsledky -->
+  <!-- Header -->
   <div class="flex items-center justify-between">
-    <h2 class="text-3xl font-bold text-white flex items-center gap-3">⏱️ Měření</h2>
+    <h2 class="section-title text-3xl">
+      ⏱️ <span class="text-white">Měření</span>
+      <span id="serialBadge" class="status-pill is-off">Nepřipojeno</span>
+    </h2>
     <div class="flex items-center gap-2">
-      <select id="displaySelect" class="p-2 rounded bg-gray-800 text-white border border-gray-600"></select>
-      <button id="toggleResultsBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow">
-        📺 Zobrazit výsledky
-      </button>
+      <select id="displaySelect" class="select"></select>
+      <button id="toggleResultsBtn" class="btn btn-danger">📺 Zobrazit výsledky</button>
     </div>
   </div>
 
-  <!-- Ovládací tlačítka -->
-  <div class="flex flex-wrap gap-4">
-    <button id="stopResetBtn" class="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded shadow disabled:opacity-50 transition">
-      ⏹️ Stop / 🔁 Reset
-    </button>
-  </div>
+  <!-- Top controls -->
+  <div class="panel">
+    <div class="flex flex-wrap items-center gap-3 gap-6-4">
+      <select id="serialPortSelect" class="select"></select>
+      <button id="connectSerialBtn" class="btn btn-primary">🔌 Připojit</button>
+      <button id="disconnectBtn" class="btn btn-danger hidden">❌ Odpojit</button>
 
-  <!-- Výběr portu a status -->
-  <div class="flex flex-wrap items-center gap-4">
-    <select id="serialPortSelect" class="bg-gray-800 text-white p-2 rounded border border-gray-600 focus:ring-2 focus:ring-blue-500"></select>
-    <button id="connectSerialBtn" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded shadow transition">🔌 Připojit</button>
-    <button id="disconnectBtn" class="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded shadow hidden transition">❌ Odpojit</button>
-    <span id="serialStatus" class="text-sm text-gray-300">Nepřipojeno</span>
-  </div>
-
-  <!-- Log -->
-  <!-- <div class="bg-black text-green-400 p-3 rounded-md h-36 overflow-y-auto text-xs font-mono border border-gray-700" id="serialLog"></div> -->
-
-  <!-- Timer display -->
-  <!-- Timer display -->
-<div class="flex justify-center mt-4">
-  <div id="timerDisplay" class="text-6xl font-bold text-white tracking-wider bg-gray-800 px-8 py-4 rounded shadow-inner border border-gray-700">
-
-    <!-- Požární útok -->
-    <div class="flex items-center justify-center gap-8 utok hidden">
-      <div class="text-center">
-        <div class="text-xs text-gray-400 mb-1">LP</div>
-        <div class="text-5xl font-bold text-green-400 lpTime">-</div>
-      </div>
-      <div class="text-center">
-        <div class="text-xs text-gray-400 mb-1">PP</div>
-        <div class="text-5xl font-bold text-blue-400 ppTime">-</div>
+      <div class="ml-auto flex items-center gap-2">
+        <button id="stopResetBtn" class="btn btn-danger">⏹️ Stop / 🔁 Reset</button>
       </div>
     </div>
-
-    <!-- Běh -->
-    <div class="flex items-center justify-center gap-6 beh hidden">
-      <!-- sem dáváš obsah pro běh -->
-    </div>
-
   </div>
-</div>
 
-
-  <!-- Výběry -->
-  <div class="flex flex-wrap items-center gap-4">
-    <select id="measurementCategory" class="bg-gray-800 text-white p-2 rounded border border-gray-600 focus:ring-2 focus:ring-blue-500"></select>
-
-    <div id="heatContainer" class="hidden flex items-center gap-2">
-      <label for="heatSelect" class="text-gray-300 text-sm">Rozběh:</label>
-      <select id="heatSelect" class="bg-gray-800 text-white p-2 rounded border border-gray-600 focus:ring-2 focus:ring-blue-500"></select>
-    </div>
-
-    <div id="attemptContainer" class="hidden flex items-center gap-2">
-      <label for="attemptSelect" class="text-gray-300 text-sm">Pokus:</label>
-      <select id="attemptSelect" class="bg-gray-800 text-white p-2 rounded border border-gray-600 focus:ring-2 focus:ring-blue-500">
-        <option value="1">1</option>
-        <option value="2">2</option>
-      </select>
+  <!-- Timer -->
+  <div class="flex justify-center">
+    <div id="timerDisplay" class="timer-shell">
+      <div class="utok hidden flex items-center justify-center gap-6">
+        <div class="laneBox">
+          <div class="laneLabel">LP</div>
+          <div class="laneTime lp lpTime">-</div>
+        </div>
+        <div class="laneBox">
+          <div class="laneLabel">PP</div>
+          <div class="laneTime pp ppTime">-</div>
+        </div>
+      </div>
+      <div class="beh hidden flex items-center justify-center">
+        <div class="timer-big">--.---</div>
+      </div>
     </div>
   </div>
 
-  <!-- Startovní listina -->
-  <div class="table-wrap shadow">
-  <table class="table-scroll bg-gray-800 text-sm divide-y divide-gray-700">
-    <thead id="measurementHead" class="text-gray-300 uppercase text-xs"></thead>
-    <tbody id="measurementRows" class="divide-y divide-gray-600"></tbody>
-  </table>
-</div>
+  <!-- Selections -->
+  <div class="panel panel-tight">
+    <div class="flex flex-wrap items-center gap-3 gap-6-4">
+      <select id="measurementCategory" class="select"></select>
 
-  <!-- Uložení výsledků -->
-  <div class="space-y-4">
-    <div id="saveAttackContainer" class="hidden space-y-2">
-      <label class="inline-flex items-center gap-2 text-sm text-gray-300">
-        <input type="checkbox" id="nCheckbox" class="form-checkbox text-red-600 rounded">
-        Neplatný pokus (N)
-      </label>
-      <button id="saveResultBtn" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded shadow transition">
-        💾 Uložit výsledek (Požární útok)
-      </button>
-      <button id="removeResultBtn" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded shadow transition">
-        🗑️ Smazat výsledky
-      </button>
+      <div id="heatContainer" class="hidden flex items-center gap-2">
+        <label for="heatSelect" class="text-sm text-slate-300">Rozběh:</label>
+        <select id="heatSelect" class="select"></select>
+      </div>
+
+      <div id="attemptContainer" class="hidden flex items-center gap-2">
+        <label for="attemptSelect" class="text-sm text-slate-300">Pokus:</label>
+        <select id="attemptSelect" class="select">
+          <option value="1">1</option><option value="2">2</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Start list (zbytek výšky) -->
+  <div class="table-region">
+    <div class="table-wrap">
+      <table class="table text-sm">
+        <thead id="measurementHead"></thead>
+        <tbody id="measurementRows">
+          <tr id="emptyStateRow">
+            <td colspan="99" class="text-center py-8 text-slate-400">
+              Zatím nic. Vyber kategorii nebo přidej záznam.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Save actions -->
+  <div class="panel panel-tight">
+    <div id="saveAttackContainer" class="hidden space-y-3">
+      <div class="flex flex-wrap gap-2">
+        <button id="saveResultBtn" class="btn btn-good">💾 Uložit výsledek (Požární útok)</button>
+        <button id="removeResultBtn" class="btn btn-ghost" style="color:#ef4444;border-color:#ef44444d">🗑️ Smazat výsledky</button>
+      </div>
     </div>
 
     <div id="saveRunContainer" class="hidden">
-      <button id="saveResult60mBtn" class="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded shadow transition">
-        💾 Uložit výsledky (60 m)
-      </button>
+      <button id="saveResult60mBtn" class="btn btn-good">💾 Uložit výsledky (60 m)</button>
     </div>
   </div>
-
 </div>

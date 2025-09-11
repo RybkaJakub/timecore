@@ -463,133 +463,328 @@ ipcMain.handle('importStartlistExcel', async (e, competitionId, categoryId, disc
 });
 
 // EXPORT PDF
-ipcMain.handle('exportStartlistPdf', async (e, {
-    competition,
-    discipline,
-    category,
-    rows,
-    headers
-}) => {
-    const templatePath = path.join(__dirname, 'startlist_template.html');
-    let html = fs.readFileSync(templatePath, 'utf-8');
 
-    // Převod datumu na český formát:
-    const formattedDate = new Date(competition.date).toLocaleDateString("cs-CZ", {
-        day: "numeric",
-        month: "long",
-        year: "numeric"
-    });
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
-    // Vložení hlaviček:
-    const theadHtml = headers.map(h => `<th>${h}</th>`).join('');
+function formatCzDate(d) {
+  try {
+    const dt = (d instanceof Date) ? d : new Date(d);
+    return dt.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'long', year: 'numeric' });
+  } catch {
+    return '';
+  }
+}
 
-    // Vložení řádků:
-    const rowsHtml = rows.map(row => {
-        return "<tr>" + row.map(col => `<td>${col}</td>`).join('') + "</tr>";
-    }).join('');
+function buildTableHtml(headers = [], rows = []) {
+  const theadHtml = headers.map(h => `<th>${escapeHtml(h)}</th>`).join('');
 
-    html = html
-        .replace('{{competitionName}}', competition.name || '')
-        .replace('{{date}}', formattedDate || '')
-        .replace('{{discipline}}', discipline || '')
-        .replace('{{category}}', category || '')
-        .replace('{{thead}}', theadHtml)
-        .replace('{{tbody}}', rowsHtml);
+  const rowsHtml = rows.map(r => {
+    const tds = (Array.isArray(r) ? r : []).map(col => `<td>${escapeHtml(col)}</td>`).join('');
+    return `<tr>${tds}</tr>`;
+  }).join('');
 
-    const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox']
+  return { theadHtml, rowsHtml };
+}
+
+function buildHeaderFooterTemplates({ titleLeft = '', titleRight = '' } = {}) {
+  const baseStyle = `
+    <style>
+      .hf {
+        font-family: Arial, sans-serif;
+        font-size: 10px;
+        color: #666;
+        padding: 0 12mm;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .hf .left { text-align: left; }
+      .hf .center { text-align: center; }
+      .hf .right { text-align: right; }
+      .truncate {
+        max-width: 70%;
+        white-space: nowrap; 
+        overflow: hidden; 
+        text-overflow: ellipsis;
+      }
+    </style>
+  `;
+  const headerTemplate = `
+    ${baseStyle}
+    <div class="hf">
+      <div class="left truncate">${escapeHtml(titleLeft)}</div>
+      <div class="right truncate">${escapeHtml(titleRight)}</div>
+    </div>
+  `;
+  const footerTemplate = `
+    ${baseStyle}
+    <div class="hf">
+      <div class="left">Vygenerováno: <span class="date"></span></div>
+      <div class="center">Strana <span class="pageNumber"></span> / <span class="totalPages"></span></div>
+      <div class="right"></div>
+    </div>
+  `;
+  return { headerTemplate, footerTemplate };
+}
+
+ipcMain.handle('exportStartlistPdf', async (e, payload) => {
+  // ---- Validace vstupu ----
+  if (!payload || typeof payload !== 'object') return false;
+  const {
+    competition = {},
+    discipline = '',
+    category = '',
+    rows = [],
+    headers = [],
+    logoPath // volitelné: absolutní cesta k logu
+  } = payload;
+
+  const competitionName = competition?.name || '';
+  const eventDate = formatCzDate(competition?.date);
+  const safeDiscipline = discipline || '';
+  const safeCategory = category || '';
+
+  const cols = Array.isArray(headers) ? headers.length : 0;
+  const landscape = cols >= 7; // víc sloupců => landscape
+
+  // ---- Načtení šablony ----
+  const templatePath = path.join(app.getAppPath(), 'src', 'assets', 'startlist_template.html');
+  if (!fs.existsSync(templatePath)) {
+    console.error('Template not found:', templatePath);
+    return false;
+  }
+  let html = fs.readFileSync(templatePath, 'utf-8');
+
+  // ---- Tabulka ----
+  const { theadHtml, rowsHtml } = buildTableHtml(headers, rows);
+
+  // ---- Logo (data URL / nebo relativní cesta) ----
+  let logoTag = '';
+  if (logoPath && fs.existsSync(logoPath)) {
+    try {
+      const buf = fs.readFileSync(logoPath);
+      const ext = path.extname(logoPath).toLowerCase();
+      const mime = ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : '';
+      if (mime) {
+        const base64 = buf.toString('base64');
+        logoTag = `<img class="logo" src="data:${mime};base64,${base64}" alt="Logo" />`;
+      }
+    } catch { /* ignore */ }
+  }
+
+  // ---- Nahradit placeholdery ----
+  html = html
+    .replace(/{{\s*logo\s*}}/g, logoTag)
+    .replace(/{{\s*competitionName\s*}}/g, escapeHtml(competitionName))
+    .replace(/{{\s*date\s*}}/g, escapeHtml(eventDate))
+    .replace(/{{\s*discipline\s*}}/g, escapeHtml(safeDiscipline))
+    .replace(/{{\s*category\s*}}/g, escapeHtml(safeCategory))
+    .replace(/{{\s*thead\s*}}/g, theadHtml)
+    .replace(/{{\s*tbody\s*}}/g, rowsHtml);
+
+  // ---- Puppeteer + PDF ----
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--font-render-hinting=medium']
     });
     const page = await browser.newPage();
-    await page.setContent(html, {waitUntil: 'networkidle0'});
+    await page.setContent(html, { waitUntil: 'networkidle0' });
 
-    const {filePath} = await dialog.showSaveDialog({
-        title: 'Uložit PDF',
-        filters: [{name: 'PDF', extensions: ['pdf']}]
+    // Pro jistotu stejný vzhled v PDF
+    await page.emulateMediaType('print');
+
+    // Hlavička/Zápatí
+    const { headerTemplate, footerTemplate } = buildHeaderFooterTemplates({
+      titleLeft: `${competitionName}`.trim(),
+      titleRight: `${safeDiscipline}${safeCategory ? ' • ' + safeCategory : ''}`.trim()
     });
 
+    // Název souboru
+    const safeName = [
+      'Startovní listina',
+      competitionName && competitionName.replace(/[\\/:*?"<>|]+/g, ' '),
+      safeDiscipline && safeDiscipline.replace(/[\\/:*?"<>|]+/g, ' '),
+      safeCategory && safeCategory.replace(/[\\/:*?"<>|]+/g, ' '),
+      eventDate
+    ].filter(Boolean).join(' - ');
+
+    const { filePath } = await dialog.showSaveDialog({
+      title: 'Uložit PDF',
+      defaultPath: `${safeName}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+    });
     if (!filePath) {
-        await browser.close();
-        return false;
+      await page.close();
+      await browser.close();
+      return false;
     }
 
     await page.pdf({
-        path: filePath,
-        format: 'A4',
-        printBackground: true,
-        margin: {top: '20mm', bottom: '20mm', left: '15mm', right: '15mm'}
+      path: filePath,
+      format: 'A4',
+      landscape,
+      printBackground: true,
+      margin: { top: '18mm', bottom: '18mm', left: '12mm', right: '12mm' },
+      displayHeaderFooter: true,
+      headerTemplate,
+      footerTemplate
     });
 
+    await page.close();
     await browser.close();
     return true;
+  } catch (err) {
+    console.error('PDF export error:', err);
+    if (browser) try { await browser.close(); } catch {}
+    return false;
+  }
 });
 
-// EXPORT EXCEL
-ipcMain.handle('exportStartlistExcel', async (e, {
-    discipline,
-    competitionName,
-    competitionDate,
-    categoryName,
-    competitionId,
-    categoryId
-}) => {
-    const {canceled, filePath} = await dialog.showSaveDialog({
-        title: 'Uložit startovku',
-        filters: [{name: 'Excel', extensions: ['xlsx']}]
-    });
 
+// EXPORT EXCEL
+const ExcelJS = require('exceljs');
+
+// barvy dle PDF/ukázky
+const BRAND = 'FF0E756E';     // tmavá zeleň na orámování
+const HEAD_BG = 'FFE6FFFA';   // světle tyrkysová hlavička
+const GRID = 'FFDDDDDD';      // světle šedé mřížky
+
+function czDate(d) {
+  if (!d) return '';
+  const dt = (d instanceof Date) ? d : new Date(d);
+  return dt.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+function safeFs(s){ return (s||'').toString().replace(/[\\/:*?"<>|]+/g,' ').trim(); }
+// vyhoď kontrolní znaky, které Excel nesnáší
+function clean(v){ return (v==null ? '' : String(v)).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ''); }
+
+function autoWidth(ws){
+  ws.columns.forEach(col=>{
+    let max = 10;
+    col.eachCell({includeEmpty:true}, c=>{
+      const len = clean(c.value).length;
+      if (len + 2 > max) max = Math.min(len + 2, 90);
+    });
+    col.width = max;
+  });
+}
+
+ipcMain.handle('exportStartlistExcel', async (e, {
+  // stejné jako u PDF
+  competition = {},            // { name, date }
+  discipline = '',
+  category = '',
+  headers = [],                // např. ['Startovní číslo','Tým']
+  rows = []                    // např. [[1,'SDH…'], [2,'SDH…'], ...]
+}) => {
+  try {
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: 'Uložit startovku',
+      defaultPath: path.join(
+        app.getPath('documents'),
+        ['Startovní listina', safeFs(competition.name), safeFs(discipline), safeFs(category), czDate(competition.date)]
+          .filter(Boolean).join(' - ') + '.xlsx'
+      ),
+      filters: [{ name:'Excel', extensions:['xlsx'] }]
+    });
     if (canceled || !filePath) return false;
 
-    let rows = [];
-    if (competitionId && categoryId) {
-        rows = await new Promise((resolve, reject) => {
-            startlistService.getStartlist(competitionId, categoryId, (err, data) => {
-                if (err) reject(err);
-                else resolve(data);
-            });
-        });
+    if (!Array.isArray(headers) || headers.length === 0) headers = ['#'];
+    if (!Array.isArray(rows)) rows = [];
+    rows = rows.map(r => Array.isArray(r) ? r.map(clean) : []);
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'TimeCore';
+
+    const ws = wb.addWorksheet(([discipline, category].filter(Boolean).join(' • ') || 'Startlist').slice(0,31));
+
+    const colCount = Math.max(headers.length, 1);
+
+    // ── Ř.1: „Startovní listina“
+    ws.mergeCells(1,1,1,colCount);
+    const title = ws.getCell(1,1);
+    title.value = 'Startovní listina';
+    title.font = { name: 'Arial', size: 18, bold: true, color: { argb: BRAND } };
+    title.alignment = { horizontal: 'left', vertical: 'middle' };
+    ws.getRow(1).height = 24;
+
+    // ── Ř.2: meta text (Soutěž / Datum / Disciplína / Kategorie)
+    ws.mergeCells(2,1,2,colCount);
+    const meta = ws.getCell(2,1);
+    meta.value = clean(
+      `Soutěž: ${competition.name || ''}    Datum: ${czDate(competition.date)}    ` +
+      `Disciplína: ${discipline || ''}    Kategorie: ${category || ''}`
+    );
+    meta.font = { name: 'Arial', size: 11, color: { argb: 'FF666666' } };
+    meta.alignment = { horizontal: 'left', vertical: 'middle' };
+    // podtržení meta řádku barvou BRAND
+    for (let c = 1; c <= colCount; c++) {
+      ws.getCell(2, c).border = {
+        bottom: { style: 'medium', color: { argb: BRAND } }
+      };
     }
 
-    const sheetData = [];
+    // ── Ř.3: mezera
+    ws.addRow([]);
 
-    // Úvodní hlavička
-    sheetData.push([
-        `Soutěž: ${competitionName || ''}`,
-        `Datum: ${competitionDate || ''}`,
-        `Disciplína: ${discipline || ''}`,
-        `Kategorie: ${categoryName || ''}`
-    ]);
+    // ── Ř.4: hlavička tabulky
+    ws.addRow(headers.map(clean));
+    const headRowIdx = 4;
+    const head = ws.getRow(headRowIdx);
+    head.height = 20;
+    head.eachCell(cell => {
+      cell.font = { name: 'Arial', size: 9, bold: true };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEAD_BG } };
+      cell.border = {
+        top: { style: 'thin', color: { argb: BRAND } },
+        left:{ style: 'thin', color: { argb: BRAND } },
+        right:{ style: 'thin', color: { argb: BRAND } },
+        bottom:{ style: 'thin', color: { argb: BRAND } }
+      };
+    });
 
-    sheetData.push([]); // prázdný řádek
+    // ── Data (bez zebra, šedé mřížky)
+    rows.forEach(r => {
+      const row = ws.addRow(r.slice(0, headers.length));
+      row.eachCell(cell => {
+        cell.font = { name: 'Arial', size: 9 };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        cell.border = {
+          top: { style: 'thin', color: { argb: GRID } },
+          left:{ style: 'thin', color: { argb: GRID } },
+          right:{ style: 'thin', color: { argb: GRID } },
+          bottom:{ style: 'thin', color: { argb: GRID } }
+        };
+      });
+    });
 
-    if (discipline === 'útok') {
-        sheetData.push(['Startovní číslo', 'Tým']);
-        rows.forEach(item => {
-            sheetData.push([
-                item.lane || '',
-                item.team || ''
-            ]);
-        });
-    } else {
-        sheetData.push(['Startovní číslo', 'Rozběh', 'Dráha', 'Jméno', 'Příjmení', '1. pokus', '2. pokus', 'Výsledný čas', 'Pořadí']);
-        rows.forEach(item => {
-            sheetData.push([
-                item.bib_number || '',
-                item.heat || '',
-                item.lane || '',
-                item.name || '',
-                item.surname || '',
-                '', '', '', ''
-            ]);
-        });
-    }
+    // Autofit + tisk
+    autoWidth(ws);
+    ws.pageSetup = {
+      orientation: (headers.length >= 7) ? 'landscape' : 'portrait',
+      fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+      margins: { left:0.35, right:0.35, top:0.5, bottom:0.5, header:0.2, footer:0.2 },
+      printTitlesRow: `1:${headRowIdx}`
+    };
 
-    const wb = xlsx.utils.book_new();
-    const ws = xlsx.utils.aoa_to_sheet(sheetData);
-    xlsx.utils.book_append_sheet(wb, ws, 'Startlist');
-    xlsx.writeFile(wb, filePath);
-
+    await wb.xlsx.writeFile(filePath);
     return true;
+  } catch (err) {
+    console.error('exportStartlistExcel error:', err);
+    return false;
+  }
 });
 
 

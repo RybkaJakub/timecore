@@ -1,6 +1,7 @@
 window.serialConnected = false;
 window.currentSelectedRowId = null;
-
+const show = id => document.getElementById(id)?.removeAttribute('hidden');
+const hide = id => document.getElementById(id)?.setAttribute('hidden', '');
 const toBool = v => v === true || v === 1 || v === '1' || v === 'true';
 
 // Funkce pro otevření modalu soutěží
@@ -490,14 +491,6 @@ function hideSidebarViews() {
     });
 }
 
-function updateThemeIcon(isDark) {
-    const iconContainer = document.getElementById('themeIcon');
-    if (!iconContainer) return;
-
-    iconContainer.outerHTML = isDark
-        ? `<svg id="themeIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>`
-        : `<svg id="themeIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="#ffffff" class="w-6 h-6"><path d="M361.5 1.2c5 2.1 8.6 6.6 9.6 11.9L391 121l107.9 19.8c5.3 1 9.8 4.6 11.9 9.6s1.5 10.7-1.6 15.2L446.9 256l62.3 90.3c3.1 4.5 3.7 10.2 1.6 15.2s-6.6 8.6-11.9 9.6L391 391 371.1 498.9c-1 5.3-4.6 9.8-9.6 11.9s-10.7 1.5-15.2-1.6L256 446.9l-90.3 62.3c-4.5 3.1-10.2 3.7-15.2 1.6s-8.6-6.6-9.6-11.9L121 391 13.1 371.1c-5.3-1-9.8-4.6-11.9-9.6s-1.5-10.7 1.6-15.2L65.1 256 2.8 165.7c-3.1-4.5-3.7-10.2-1.6-15.2s6.6-8.6 11.9-9.6L121 121 140.9 13.1c1-5.3 4.6-9.8 9.6-11.9s10.7-1.5 15.2 1.6L256 65.1 346.3 2.8c4.5-3.1 10.2-3.7 15.2-1.6zM160 256a96 96 0 1 1 192 0 96 96 0 1 1 -192 0zm224 0a128 128 0 1 0 -256 0 128 128 0 1 0 256 0z"/></svg>`;
-}
 
 async function loadCategoriesForSelectedCompetition() {
     const competitionId = localStorage.getItem('selectedCompetitionId');
@@ -520,10 +513,10 @@ async function loadCategoriesForSelectedCompetition() {
         option.textContent = cat.name;
         sel.appendChild(option);
     });
-    document.getElementById('laneCountSelect').classList.add('hidden');
-    document.getElementById('addStartlistEntryBtn').classList.add('hidden');
-    document.getElementById('generateStartlistBtn').classList.add('hidden');
-    document.getElementById('addTeamBtn').classList.add('hidden');
+    hide('laneCountSelect');
+    hide('addStartlistEntryBtn');
+    hide('generateStartlistBtn');
+    hide('addTeamBtn');
 
     const tbody = document.getElementById('startlistRows');
     const thead = document.getElementById('startlistHead');
@@ -533,6 +526,95 @@ async function loadCategoriesForSelectedCompetition() {
     thead.innerHTML = '';
 }
 
+// ===== Startlist Search (binduje se JEDNOU, znovu se jen filtruje) =====
+const setupStartlistSearch = (() => {
+    let bound = false;
+    let rowsEl, searchEl, clearBtn, badgeEl;
+    let defaultDisplay = 'table';
+
+    const norm = s => (s || '').toString().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ').trim();
+
+    const getRows = () =>
+        Array.from(rowsEl.querySelectorAll('#startlistRows > tr'))
+            .filter(tr => tr.id !== 'emptyStateRow');
+
+    const primeDefaultDisplay = () => {
+        const first = getRows()[0];
+        if (first) defaultDisplay = getComputedStyle(first).display || 'table';
+    };
+
+    const updateBadge = () => {
+        if (!badgeEl) return;
+        const all = getRows().length;
+        const visible = getRows().filter(tr => tr.style.display !== 'none').length;
+        badgeEl.textContent = `${visible} / ${all} položek`;
+    };
+
+    const toggleEmpty = () => {
+        const emptyRow = document.getElementById('emptyStateRow');
+        if (!emptyRow) return;
+        const anyVisible = getRows().some(tr => tr.style.display !== 'none');
+        emptyRow.classList.toggle('hidden', anyVisible);
+    };
+
+    const filter = () => {
+        const q = norm(searchEl?.value || '');
+        for (const tr of getRows()) {
+            const hide = q && !norm(tr.innerText).includes(q);
+            tr.style.display = hide ? 'none' : defaultDisplay; // neřešíme .hidden vs display:table
+        }
+        toggleEmpty();
+        updateBadge();
+    };
+
+    // veřejná init funkce
+    return function initSearch() {
+        rowsEl = document.getElementById('startlistRows');
+        searchEl = document.getElementById('searchStartlistInput');
+        clearBtn = document.getElementById('searchClearBtn');     // může být null, nevadí
+        badgeEl = document.getElementById('rowsCountBadge');     // může být null, nevadí
+        if (!rowsEl) return;
+
+        primeDefaultDisplay();
+        filter(); // hned spočti a přefiltruj
+
+        if (!bound) {
+            // debounce
+            let t;
+            const deb = (fn, ms = 120) => (...a) => {
+                clearTimeout(t);
+                t = setTimeout(() => fn(...a), ms);
+            };
+
+            searchEl?.addEventListener('input', deb(filter, 120));
+            searchEl?.addEventListener('keydown', e => {
+                if (e.key === 'Escape') {
+                    searchEl.value = '';
+                    filter();
+                }
+            });
+            clearBtn?.addEventListener('click', () => {
+                if (searchEl) {
+                    searchEl.value = '';
+                    searchEl.focus();
+                }
+                filter();
+            });
+
+            // kdykoli se vymění řádky -> znovu načti default display a filtr
+            const mo = new MutationObserver(() => {
+                primeDefaultDisplay();
+                filter();
+            });
+            mo.observe(rowsEl, {childList: true});
+            bound = true;
+        }
+    };
+})();
+
+
 function attachStartlistListeners() {
     const importCsvBtn = document.getElementById('importCsvBtn');
     const importExcelBtn = document.getElementById('importExcelBtn');
@@ -541,38 +623,79 @@ function attachStartlistListeners() {
     const exportPdfBtn = document.getElementById('exportPdfBtn');
     const addRunnerBtn = document.getElementById('addStartlistEntryBtn');
     const addTeamBtn = document.getElementById('addTeamBtn');
-    const cancelRunnerBtn = document.getElementById('cancelTeamBtn');
-    const cancelTeamBtn = document.getElementById('cancelRunnerBtn');
+    const cancelRunnerBtn = document.getElementById('cancelRunnerBtn'); // FIX
+    const cancelTeamBtn = document.getElementById('cancelTeamBtn');   // FIX
     const saveRunnerBtn = document.getElementById('saveRunnerBtn');
     const saveTeamBtn = document.getElementById('saveTeamBtn');
     const categorySelect = document.getElementById('categorySelect');
     const laneCountSelect = document.getElementById('laneCountSelect');
 
     const searchInput = document.getElementById('searchStartlistInput');
+    const rowsContainer = document.getElementById('startlistRows');
 
     let currentSearch = '';
 
+    const normalize = (s) =>
+        (s || '')
+            .toString()
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
     const filterRows = () => {
-        const rows = document.querySelectorAll('#startlistRows tr');
-        rows.forEach(row => {
-            const text = row.innerText.toLowerCase();
-            if (text.includes(currentSearch.toLowerCase())) {
-                row.classList.remove('hidden');
+        if (!rowsContainer) return;
+        const q = normalize(currentSearch);
+        rowsContainer.querySelectorAll('tr').forEach(row => {
+            const text = normalize(row.innerText);
+            const hide = q && !text.includes(q);
+            if (hide) {
+                row.style.display = 'none';
             } else {
-                row.classList.add('hidden');
+                // vrať zpět layout tabulky
+                row.style.display = 'table';
             }
         });
     };
 
-    if (searchInput) {
-        if (searchInput._listener) {
-            searchInput.removeEventListener('input', searchInput._listener);
-        }
-        searchInput._listener = (e) => {
-            currentSearch = e.target.value;
-            filterRows();
+
+    const debounce = (fn, ms) => {
+        let t;
+        return (...a) => {
+            clearTimeout(t);
+            t = setTimeout(() => fn(...a), ms);
         };
-        searchInput.addEventListener('input', searchInput._listener);
+    };
+
+    if (searchInput) {
+        if (searchInput._inputListener) {
+            searchInput.removeEventListener('input', searchInput._inputListener);
+        }
+        searchInput._inputListener = debounce((e) => {
+            currentSearch = e.target.value || '';
+            filterRows();
+        }, 150);
+        searchInput.addEventListener('input', searchInput._inputListener);
+
+        if (searchInput._keyListener) {
+            searchInput.removeEventListener('keydown', searchInput._keyListener);
+        }
+        searchInput._keyListener = (e) => {
+            if (e.key === 'Escape') {
+                e.target.value = '';
+                currentSearch = '';
+                filterRows();
+            }
+        };
+        searchInput.addEventListener('keydown', searchInput._keyListener);
+    }
+
+    if (rowsContainer) {
+        if (!rowsContainer._mo) {
+            rowsContainer._mo = new MutationObserver(filterRows);
+            rowsContainer._mo.observe(rowsContainer, {childList: true});
+        }
     }
 
     if (importCsvBtn) {
@@ -784,6 +907,8 @@ function attachStartlistListeners() {
 
             await window.electron.invoke('addStartlistEntry', entry);
             document.querySelectorAll('.modal').forEach(modal => modal.classList.add('hidden'));
+            document.getElementById('teamName').value = '';
+            document.getElementById('teamStartPosition').value = '';
             categorySelect.dispatchEvent(new Event('change'));
         });
     }
@@ -861,10 +986,10 @@ function attachStartlistListeners() {
                     tbody.appendChild(tr);
 
                 });
-                document.getElementById('addTeamBtn').classList.remove('hidden');
-                document.getElementById('laneCountSelect').classList.add('hidden');
-                document.getElementById('addStartlistEntryBtn').classList.add('hidden');
-                document.getElementById('generateStartlistBtn').classList.add('hidden');
+                hide('generateStartlistBtn');
+                hide('addStartlistEntryBtn');
+                hide('laneCountSelect');
+                show('addTeamBtn');
 
             } else {
 
@@ -940,12 +1065,14 @@ function attachStartlistListeners() {
 
                     tbody.appendChild(tr);
                 });
-                document.getElementById('laneCountSelect').classList.remove('hidden');
-                document.getElementById('addStartlistEntryBtn').classList.remove('hidden');
-                document.getElementById('generateStartlistBtn').classList.remove('hidden');
-                document.getElementById('addTeamBtn').classList.add('hidden');
+
+                show('generateStartlistBtn');
+                show('addStartlistEntryBtn');
+                show('laneCountSelect');
+                hide('addTeamBtn');
             }
         });
+        setupStartlistSearch();
     }
 }
 
@@ -1013,130 +1140,134 @@ async function loadMeasurementStartlist(competitionId, categoryId, discipline) {
         attemptContainer.classList.add('hidden');
 
         thead.innerHTML = `
-      <tr class="bg-gray-700 text-gray-200 uppercase text-xs">
-      <th class="p-2 border border-gray-600 w-28">Start. č.</th>
-      <th class="p-2 border border-gray-600 w-64">Družstvo</th>
-      <th class="p-2 border border-gray-600 w-48">LP čas</th>
-      <th class="p-2 border border-gray-600 w-48">PP čas</th>
-      <th class="p-2 border border-gray-600 w-48">Výsledek</th>
-      <th class="p-2 border border-gray-600 w-48">Platný pokus</th>
-      <th class="w-1"></th>
-    </tr>
-    `;
+          <tr class="bg-gray-700 text-gray-200 uppercase text-xs">
+          <th class="p-2 border border-gray-600 w-28">Start. č.</th>
+          <th class="p-2 border border-gray-600 w-64">Družstvo</th>
+          <th class="p-2 border border-gray-600 w-48">LP čas</th>
+          <th class="p-2 border border-gray-600 w-48">PP čas</th>
+          <th class="p-2 border border-gray-600 w-48">Výsledek</th>
+          <th class="p-2 border border-gray-600 w-48">Platný pokus</th>
+        </tr>
+        `;
 
         rows.forEach(r => {
             const tr = document.createElement('tr');
             const isN = !!r.results[0]?.is_n;
             const valid = !isN;
-            tr.dataset.id = r.results[0].id;
+            tr.dataset.id = r.id;
+            tr.dataset.resultId = r.results[0].id;
+
             tr.className = [
                 'h-10 leading-none transition-colors',
                 'hover:bg-gray-600/60'
             ].join(' ');
             tr.innerHTML = `
-            <td class="p-2 border border-gray-600 text-center font-medium  w-28">${r.start_number ?? ''}</td>
-      <td class="p-2 border border-gray-600 w-64">
-        <div class="flex items-center gap-2">
-          <span class="font-semibold tracking-wide">${r.team ?? ''}</span>
-        </div>
-      </td>
-      <td class="p-2 border border-gray-600 text-center lp-time w-48" contenteditable="true">${r.results[0].time_lp ?? '-'}</td>
-      <td class="p-2 border border-gray-600 text-center pp-time w-48" contenteditable="true">${r.results[0].time_pp ?? '-'}</td>
-      <td class="p-2 border border-gray-600 text-center font-semibold result-time w-48">
-        ${r.results[0].final_time ?? '-'}
-      </td>
-      <td class="p-2 border border-gray-600 text-center font-semibold w-48">
-  ${
-    r.results[0].is_n != null
-      ? `<div class="flex justify-center">
-            <button 
-              class="validity-toggle-utok px-3 py-1 rounded text-white text-sm transition
-                ${valid ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}"
-              data-valid="${valid}"
-              data-index="${r.results[0].id}"
-            >
-              ${valid ? '✅ PLATNÝ' : '❌ NEPLATNÝ'}
-            </button>
-          </div>`
-      : '-'
-  }
-</td>
-
-
-        
-      `;
+                <td class="p-2 border border-gray-600 text-center font-medium  w-28">${r.start_number ?? ''}</td>
+          <td class="p-2 border border-gray-600 w-64">
+            <div class="flex items-center gap-2">
+              <span class="font-semibold tracking-wide">${r.team ?? ''}</span>
+            </div>
+          </td>
+          <td class="p-2 border border-gray-600 text-center lp-time w-48" contenteditable="true">${r.results[0].time_lp ?? '-'}</td>
+          <td class="p-2 border border-gray-600 text-center pp-time w-48" contenteditable="true">${r.results[0].time_pp ?? '-'}</td>
+          <td class="p-2 border border-gray-600 text-center font-semibold result-time w-48">
+            ${r.results[0].final_time ?? '-'}
+          </td>
+          <td class="p-2 border border-gray-600 text-center font-semibold w-48">
+      ${
+                r.results[0].is_n != null
+                    ? `<div class="flex justify-center">
+                <button 
+                  class="validity-toggle-utok px-3 py-1 rounded text-white text-sm transition
+                    ${valid ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}"
+                  data-valid="${valid}"
+                  data-index="${r.results[0].id}"
+                >
+                  ${valid ? '✅ PLATNÝ' : '❌ NEPLATNÝ'}
+                </button>
+              </div>`
+                    : '-'
+            }
+    </td>
+    
+    
+            
+          `;
 
             tbody.appendChild(tr);
         });
 
         const patchResult = async (id, patch) => {
-  if (!Number.isFinite(id)) { console.error('Invalid id', id, patch); return; }
-  console.log('[IPC] updateResults ->', id, patch);
-  return await window.electron.invoke('updateResults', { id, ...patch });
-};
+            if (!Number.isFinite(id)) {
+                console.error('Invalid id', id, patch);
+                return;
+            }
+            console.log('[IPC] updateResults ->', id, patch);
+            return await window.electron.invoke('updateResults', {id, ...patch});
+        };
 
-// toggle platnosti
-document.getElementById('measurementRows')?.addEventListener('click', async (e) => {
-  const btn = e.target.closest('.validity-toggle-utok');
-  if (!btn) return;
+        // toggle platnosti
+        document.getElementById('measurementRows')?.addEventListener('click', async (e) => {
+            const btn = e.target.closest('.validity-toggle-utok');
+            if (!btn) return;
 
-  const tr = btn.closest('tr');
-  const id = Number(btn.dataset.index || tr?.dataset.id);
-  const wasValid = btn.dataset.valid === 'true';
-  const nowValid = !wasValid;
+            const tr = btn.closest('tr');
+            const id = Number(btn.dataset.index || tr?.dataset.id);
+            const wasValid = btn.dataset.valid === 'true';
+            const nowValid = !wasValid;
 
-  const res = await patchResult(id, { is_n: !nowValid });
+            const res = await patchResult(id, {is_n: !nowValid});
 
-  btn.dataset.valid = String(nowValid);
-  btn.textContent = nowValid ? '✅ PLATNÝ' : '❌ NEPLATNÝ';
-  btn.classList.toggle('bg-green-600', nowValid);
-  btn.classList.toggle('hover:bg-green-700', nowValid);
-  btn.classList.toggle('bg-red-600', !nowValid);
-  btn.classList.toggle('hover:bg-red-700', !nowValid);
+            btn.dataset.valid = String(nowValid);
+            btn.textContent = nowValid ? '✅ PLATNÝ' : '❌ NEPLATNÝ';
+            btn.classList.toggle('bg-green-600', nowValid);
+            btn.classList.toggle('hover:bg-green-700', nowValid);
+            btn.classList.toggle('bg-red-600', !nowValid);
+            btn.classList.toggle('hover:bg-red-700', !nowValid);
 
-  const finalEl = tr.querySelector('.result-time');
-  const newFinal = res?.updated?.final_time;
-  if (finalEl && newFinal != null) {
-    finalEl.textContent = Number(newFinal).toFixed(2);
-  }
-});
+            const finalEl = tr.querySelector('.result-time');
+            const newFinal = res?.updated?.final_time;
+            if (finalEl && newFinal != null) {
+                finalEl.textContent = Number(newFinal).toFixed(2);
+            }
+        });
 
-// edit LP/PP – použij focusout (bublá)
-document.getElementById('measurementRows')?.addEventListener('focusout', async (e) => {
-  const td = e.target.closest('td.lp-time, td.pp-time');
-  if (!td) return;
+        // edit LP/PP – použij focusout (bublá)
+        document.getElementById('measurementRows')?.addEventListener('focusout', async (e) => {
+            const td = e.target.closest('td.lp-time, td.pp-time');
+            if (!td) return;
 
-  const tr = td.closest('tr');
-  const id = Number(tr?.dataset.id);
-  const raw = (td.textContent || '').trim().toUpperCase().replace(',', '.');
+            const tr = td.closest('tr');
+            const id = Number(tr?.dataset.resultId);
+            const raw = (td.textContent || '').trim().toUpperCase().replace(',', '.');
 
-  let val = null;
-  if (raw && raw !== '-' && raw !== 'N') {
-    const num = Number(raw);
-    val = Number.isFinite(num) ? num : null;
-  }
+            let val = null;
+            if (raw && raw !== '-' && raw !== 'N') {
+                const num = Number(raw);
+                val = Number.isFinite(num) ? num : null;
+            }
 
-  const patch = td.classList.contains('lp-time') ? { time_lp: val } : { time_pp: val };
-  const res = await patchResult(id, patch);
+            const patch = td.classList.contains('lp-time') ? {time_lp: val} : {time_pp: val};
+            const res = await patchResult(id, patch);
 
-  td.textContent = val == null ? '-' : Number(val).toFixed(2);
+            td.textContent = val == null ? '-' : Number(val).toFixed(2);
 
-  const finalEl = tr.querySelector('.result-time');
-  const newFinal = res?.updated?.final_time;
-  if (finalEl && newFinal != null) {
-    finalEl.textContent =  Number(newFinal).toFixed(2);
-  }
-});
+            const finalEl = tr.querySelector('.result-time');
+            const newFinal = res?.updated?.final_time;
+            if (finalEl && newFinal != null) {
+                finalEl.textContent = Number(newFinal).toFixed(2);
+            }
+        });
 
-// zabraň enteru v contenteditable dělat nový řádek a místo toho “blur”
-document.getElementById('measurementRows')?.addEventListener('keydown', (e) => {
-  const td = e.target.closest('td.lp-time, td.pp-time');
-  if (!td) return;
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    td.blur();
-  }
-});
+        // zabraň enteru v contenteditable dělat nový řádek a místo toho “blur”
+        document.getElementById('measurementRows')?.addEventListener('keydown', (e) => {
+            const td = e.target.closest('td.lp-time, td.pp-time');
+            if (!td) return;
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                td.blur();
+            }
+        });
 
 
     } else {
@@ -1171,18 +1302,18 @@ document.getElementById('measurementRows')?.addEventListener('keydown', (e) => {
             tbody.innerHTML = '';
             thead.innerHTML = '';
             thead.innerHTML = `
-        <tr>
-          <th class="p-2">Rozběh</th>
-          <th class="p-2">Dráha</th>
-          <th class="p-2">Startovní číslo</th>
-          <th class="p-2">Jméno</th>
-          <th class="p-2">Příjmení</th>
-          <th class="p-2">Tým</th>
-          <th class="p-2">1. pokus</th>
-          <th class="p-2">2. pokus</th>
-          <th class="p-2">Výsledek</th>
-        </tr>
-      `;
+            <tr>
+              <th class="p-2">Rozběh</th>
+              <th class="p-2">Dráha</th>
+              <th class="p-2">Startovní číslo</th>
+              <th class="p-2">Jméno</th>
+              <th class="p-2">Příjmení</th>
+              <th class="p-2">Tým</th>
+              <th class="p-2">1. pokus</th>
+              <th class="p-2">2. pokus</th>
+              <th class="p-2">Výsledek</th>
+            </tr>
+          `;
 
             allRows
                 .filter(r => r.heat == heat)
@@ -1191,16 +1322,16 @@ document.getElementById('measurementRows')?.addEventListener('keydown', (e) => {
                     const tr = document.createElement('tr');
                     tr.dataset.id = r.id;
                     tr.innerHTML = `
-            <td class="p-2">${r.heat ?? ''}</td>
-            <td class="p-2">${r.lane}</td>
-            <td class="p-2">${r.start_number}</td>
-            <td class="p-2">${r.name ?? ''}</td>
-            <td class="p-2">${r.surname ?? ''}</td>
-            <td class="p-2">${r.team ?? ''}</td>
-            <td class="p-2 time-1 ${toBool(r.results[0].is_n_first) ? 'text-red-400 font-semibold' : ''}">${r.results[0].is_n_first ? `N (${r.results[0].time_first})` : (r.results[0].time_first ?? '')}</td>
-            <td class="p-2 time-2 ${toBool(r.results[0].is_n_second) ? 'text-red-400 font-semibold' : ''}">${r.results[0].is_n_second ? `N (${r.results[0].time_second})` : (r.results[0].time_second ?? '')}</td>
-            <td class="p-2 result-time ${toBool(r.results[0].is_n_first) && toBool(r.results[0].is_n_second) ? 'text-red-400 font-semibold' : ''}">${r.results[0].final_time ?? ''}</td>
-          `;
+                <td class="p-2">${r.heat ?? ''}</td>
+                <td class="p-2">${r.lane}</td>
+                <td class="p-2">${r.start_number}</td>
+                <td class="p-2">${r.name ?? ''}</td>
+                <td class="p-2">${r.surname ?? ''}</td>
+                <td class="p-2">${r.team ?? ''}</td>
+                <td class="p-2 time-1 ${toBool(r.results[0].is_n_first) ? 'text-red-400 font-semibold' : ''}">${r.results[0].is_n_first ? `N (${r.results[0].time_first})` : (r.results[0].time_first ?? '')}</td>
+                <td class="p-2 time-2 ${toBool(r.results[0].is_n_second) ? 'text-red-400 font-semibold' : ''}">${r.results[0].is_n_second ? `N (${r.results[0].time_second})` : (r.results[0].time_second ?? '')}</td>
+                <td class="p-2 result-time ${toBool(r.results[0].is_n_first) && toBool(r.results[0].is_n_second) ? 'text-red-400 font-semibold' : ''}">${r.results[0].final_time ?? ''}</td>
+              `;
                     tbody.appendChild(tr);
                 });
         }
@@ -1260,10 +1391,12 @@ async function attachMeasurementListeners() {
         serialSelect.appendChild(option);
     });
 
+    const b = document.getElementById('serialBadge');
+
     if (window.serialConnected) {
-        document.getElementById('serialStatus').textContent = "Připojeno";
-        document.getElementById('serialStatus').classList.remove('text-gray-300');
-        document.getElementById('serialStatus').classList.add('text-green-400');
+        b.textContent = 'Připojeno';
+        b.classList.remove('is-off');
+        b.classList.add('is-on');
         connectBtn?.classList.add('hidden');
         disconnectBtn?.classList.remove('hidden');
         serialSelect?.classList.add('hidden');
@@ -1284,9 +1417,9 @@ async function attachMeasurementListeners() {
         }
         await window.electron.invoke('openSerialPort', port);
         window.serialConnected = true;
-        document.getElementById('serialStatus').textContent = "Připojeno";
-        document.getElementById('serialStatus').classList.remove('text-gray-300');
-        document.getElementById('serialStatus').classList.add('text-green-400');
+        b.textContent = 'Připojeno';
+        b.classList.remove('is-off');
+        b.classList.add('is-on');
         connectBtn?.classList.add('hidden');
         disconnectBtn?.classList.remove('hidden');
         serialSelect?.classList.add('hidden');
@@ -1302,9 +1435,9 @@ async function attachMeasurementListeners() {
     disconnectBtn?.addEventListener('click', async () => {
         await window.electron.invoke('closeSerialPort');
         window.serialConnected = false;
-        document.getElementById('serialStatus').textContent = "Nepřipojeno";
-        document.getElementById('serialStatus').classList.add('text-gray-300');
-        document.getElementById('serialStatus').classList.remove('text-green-400');
+        b.textContent = 'Nepřipojeno';
+        b.classList.remove('is-on');
+        b.classList.add('is-off');
         disconnectBtn?.classList.add('hidden');
         connectBtn?.classList.remove('hidden');
         serialSelect?.classList.remove('hidden');
@@ -1342,27 +1475,27 @@ async function attachMeasurementListeners() {
                 const activeRows = Array.from(document.querySelectorAll('#measurementRows tr')).filter(r => r.offsetParent !== null);
 
                 timerDisplay.innerHTML = `
-  <div class="flex items-center justify-center gap-6">
-    ${activeRows.map((r, i) => {
+      <div class="flex items-center justify-center gap-6">
+        ${activeRows.map((r, i) => {
                     const time = payload.times[i] !== null ? `${payload.times[i].toFixed(3)} s` : "---";
                     const valid = laneValidityState[i] !== false; // defaultně platný
                     return `
-        <div class="text-center" data-lane="${i}">
-          <div class="text-xs text-gray-400 mb-1">Dráha ${i + 1}</div>
-          <div class="text-4xl font-bold text-yellow-400">${time}</div>
-          <button 
-            class="validity-toggle mt-2 px-3 py-1 rounded text-white text-sm transition
-              ${valid ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}"
-            data-valid="${valid}"
-            data-index="${i}"
-          >
-            ${valid ? '✅ PLATNÝ' : '❌ NEPLATNÝ'}
-          </button>
-        </div>
-      `;
+            <div class="text-center" data-lane="${i}">
+              <div class="text-xs text-gray-400 mb-1">Dráha ${i + 1}</div>
+              <div class="text-4xl font-bold text-yellow-400">${time}</div>
+              <button 
+                class="validity-toggle mt-2 px-3 py-1 rounded text-white text-sm transition
+                  ${valid ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}"
+                data-valid="${valid}"
+                data-index="${i}"
+              >
+                ${valid ? '✅ PLATNÝ' : '❌ NEPLATNÝ'}
+              </button>
+            </div>
+          `;
                 }).join('')}
-  </div>
-`;
+      </div>
+    `;
                 document.querySelectorAll('.validity-toggle').forEach(btn => {
                     const index = btn.dataset.index;
                     btn.addEventListener('click', () => {
@@ -1426,15 +1559,15 @@ async function attachMeasurementListeners() {
             const wrap = document.createElement('div');
             wrap.className = 'fixed inset-0 z-50 flex items-center justify-center';
             wrap.innerHTML = `
-      <div class="absolute inset-0 bg-black/60"></div>
-      <div class="relative bg-gray-800 text-white rounded-lg shadow-xl w-full max-w-md p-6">
-        <h3 class="text-lg font-semibold mb-2">${title}</h3>
-        <p class="text-sm text-gray-300 mb-6">${message}</p>
-        <div class="flex justify-end gap-3">
-          <button class="btn-cancel px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded">${cancel}</button>
-          <button class="btn-ok px-4 py-2 bg-red-600 hover:bg-red-700 rounded">${ok}</button>
-        </div>
-      </div>`;
+          <div class="absolute inset-0 bg-black/60"></div>
+          <div class="relative bg-gray-800 text-white rounded-lg shadow-xl w-full max-w-md p-6">
+            <h3 class="text-lg font-semibold mb-2">${title}</h3>
+            <p class="text-sm text-gray-300 mb-6">${message}</p>
+            <div class="flex justify-end gap-3">
+              <button class="btn-cancel px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded">${cancel}</button>
+              <button class="btn-ok px-4 py-2 bg-red-600 hover:bg-red-700 rounded">${ok}</button>
+            </div>
+          </div>`;
             document.body.appendChild(wrap);
             const done = v => {
                 wrap.remove();
@@ -1498,81 +1631,83 @@ async function attachMeasurementListeners() {
 
 
     document.getElementById('saveResultBtn')?.addEventListener('click', async () => {
-  const competitionId = localStorage.getItem('selectedCompetitionId');
-  const categoryId = document.getElementById('measurementCategory')?.value;
-  if (!competitionId || !categoryId) return;
+        const competitionId = localStorage.getItem('selectedCompetitionId');
+        const categoryId = document.getElementById('measurementCategory')?.value;
+        if (!competitionId || !categoryId) return;
 
-  console.log(competitionId);
+        console.log(competitionId);
 
-  const startlistId = window.currentSelectedRowId;
-  if (!startlistId) return;
+        const startlistId = window.currentSelectedRowId;
+        if (!startlistId) return;
 
-  const readNum = sel => {
+        const readNum = sel => {
     const el = document.querySelector(sel);
     if (!el) return null;
-    const raw = (el.textContent || '').trim().replace(',', '.');
+    let raw = (el.textContent || '').trim().toLowerCase();
+    raw = raw.replace(',', '.');       // české čárky
+    raw = raw.replace(/[^0-9.\-]/g, ''); // vyhoď všechno krom číslic, tečky a minus
     const num = Number(raw);
     return Number.isFinite(num) ? num : null;
-  };
+};
 
-  const time_lp = readNum('.lpTime');
-  const time_pp = readNum('.ppTime');
-  const vals = [time_lp, time_pp].filter(v => v != null);
-  const final_time = vals.length ? Math.max(...vals) : 999.999; // sjednoť na 999.999
+        const time_lp = readNum('.lpTime');
+        const time_pp = readNum('.ppTime');
+        console.log("LP: ", time_lp, ", PP: ", time_pp);
+        const vals = [time_lp, time_pp].filter(v => v != null);
+        const final_time = vals.length ? Math.max(...vals) : 999.999; // sjednoť na 999.999
 
-  let existing = null;
-  try {
-    const existingMap = await window.electron.invoke('getResultsByStartlistIds', [startlistId]);
-    existing = Array.isArray(existingMap) ? existingMap[0] : (existingMap?.[startlistId] ?? null);
-  } catch (e) {
-    console.warn('getResultsByStartlistIds selhalo:', e);
-  }
+        let existing = null;
+        try {
+            const existingMap = await window.electron.invoke('getResultsByStartlistIds', [startlistId]);
+            existing = Array.isArray(existingMap) ? existingMap[0] : (existingMap?.[startlistId] ?? null);
+        } catch (e) {
+            console.warn('getResultsByStartlistIds selhalo:', e);
+        }
 
-  const exists = !!existing && (existing.id != null);
+        const exists = !!existing && (existing.id != null);
 
-  if (exists) {
-    const ok = await confirmDanger({
-      message: 'Pro tento tým už je uložen výsledek. Opravdu ho chceš přepsat?',
-      ok: 'Ano, přepsat',
-      cancel: 'Ne, ponechat'
+        if (exists) {
+            const ok = await confirmDanger({
+                message: 'Pro tento tým už je uložen výsledek. Opravdu ho chceš přepsat?',
+                ok: 'Ano, přepsat',
+                cancel: 'Ne, ponechat'
+            });
+            if (!ok) return;
+        }
+
+        const payload = {
+            startlist_id: Number(startlistId),
+            discipline: 'Požární útok',
+            time_lp, time_pp,
+            final_time,
+            ...(existing?.id ? {id: existing.id} : {})
+        };
+
+        try {
+            const res = await window.electron.invoke('saveResult', payload);
+            console.log('[saveResult] payload:', payload, '-> response:', res);
+
+            if (!res?.success) {
+                alert('Uložení selhalo: ' + (res?.error || 'neznámá chyba'));
+                return;
+            }
+
+            // posun + reload
+            const currentRow = document.querySelector(`tr[data-id="${startlistId}"]`);
+            const nextRow = currentRow?.nextElementSibling;
+            if (nextRow) {
+                document.querySelectorAll('#measurementRows tr').forEach(r => r.classList.remove('highlighted'));
+                nextRow.classList.add('highlighted');
+                window.currentSelectedRowId = nextRow.dataset.id;
+            }
+
+            await loadMeasurementStartlist(competitionId, categoryId, 'Požární útok');
+            alert(exists ? 'Výsledek přepsán.' : 'Výsledek uložen.');
+        } catch (err) {
+            console.error('saveResult error:', err);
+            alert('Uložení selhalo (IPC). Mrkni do konzole.');
+        }
     });
-    if (!ok) return;
-  }
-
-  const payload = {
-    startlist_id: Number(startlistId),
-    discipline: 'Požární útok',
-    time_lp, time_pp,
-    final_time,
-    ...(existing?.id ? { id: existing.id } : {})
-  };
-
-  try {
-    const res = await window.electron.invoke('saveResult', payload);
-    console.log('[saveResult] payload:', payload, '-> response:', res);
-
-    if (!res?.success) {
-      alert('Uložení selhalo: ' + (res?.error || 'neznámá chyba'));
-      return;
-    }
-
-    // posun + reload
-    const currentRow = document.querySelector(`tr[data-id="${startlistId}"]`);
-    const nextRow = currentRow?.nextElementSibling;
-    if (nextRow) {
-      document.querySelectorAll('#measurementRows tr').forEach(r => r.classList.remove('highlighted'));
-      nextRow.classList.add('highlighted');
-      window.currentSelectedRowId = nextRow.dataset.id;
-    }
-
-    await loadMeasurementStartlist(competitionId, categoryId, 'Požární útok');
-    alert(exists ? 'Výsledek přepsán.' : 'Výsledek uložen.');
-  } catch (err) {
-    console.error('saveResult error:', err);
-    alert('Uložení selhalo (IPC). Mrkni do konzole.');
-  }
-});
-
 
 
     document.getElementById('saveResult60mBtn')?.addEventListener('click', async () => {
