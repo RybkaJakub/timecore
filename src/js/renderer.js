@@ -1168,8 +1168,12 @@ async function loadMeasurementStartlist(competitionId, categoryId, discipline) {
               <span class="font-semibold tracking-wide">${r.team ?? ''}</span>
             </div>
           </td>
-          <td class="p-2 border border-gray-600 text-center lp-time w-48" contenteditable="true">${r.results[0].time_lp ?? '-'}</td>
-          <td class="p-2 border border-gray-600 text-center pp-time w-48" contenteditable="true">${r.results[0].time_pp ?? '-'}</td>
+          <td class="p-2 border border-gray-600 text-center w-48">
+            <div class="lp-time" contenteditable="true" spellcheck="false">${r.results[0].time_lp ?? '-'}</div>
+          </td>
+          <td class="p-2 border border-gray-600 text-center w-48">
+            <div class="pp-time" contenteditable="true" spellcheck="false">${r.results[0].time_pp ?? '-'}</div>
+          </td>
           <td class="p-2 border border-gray-600 text-center font-semibold result-time w-48">
             ${r.results[0].final_time ?? '-'}
           </td>
@@ -1641,14 +1645,14 @@ async function attachMeasurementListeners() {
         if (!startlistId) return;
 
         const readNum = sel => {
-    const el = document.querySelector(sel);
-    if (!el) return null;
-    let raw = (el.textContent || '').trim().toLowerCase();
-    raw = raw.replace(',', '.');       // české čárky
-    raw = raw.replace(/[^0-9.\-]/g, ''); // vyhoď všechno krom číslic, tečky a minus
-    const num = Number(raw);
-    return Number.isFinite(num) ? num : null;
-};
+            const el = document.querySelector(sel);
+            if (!el) return null;
+            let raw = (el.textContent || '').trim().toLowerCase();
+            raw = raw.replace(',', '.');       // české čárky
+            raw = raw.replace(/[^0-9.\-]/g, ''); // vyhoď všechno krom číslic, tečky a minus
+            const num = Number(raw);
+            return Number.isFinite(num) ? num : null;
+        };
 
         const time_lp = readNum('.lpTime');
         const time_pp = readNum('.ppTime');
