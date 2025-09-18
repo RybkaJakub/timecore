@@ -4,6 +4,77 @@ const show = id => document.getElementById(id)?.removeAttribute('hidden');
 const hide = id => document.getElementById(id)?.setAttribute('hidden', '');
 const toBool = v => v === true || v === 1 || v === '1' || v === 'true';
 
+async function confirmBox({
+  title = 'Změna výsledku',
+  message = 'Opravdu přepsat uložený výsledek? Tato akce je nevratná.',
+  ok = 'Ano, přepsat',
+  cancel = 'Zrušit'
+} = {}) {
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.className = 'fixed inset-0 z-50 flex items-center justify-center';
+    wrap.innerHTML = `
+      <div class="absolute inset-0 bg-black/60"></div>
+      <div class="relative bg-gray-800 text-white rounded-lg shadow-xl w-full max-w-md p-6 animate-[pop_.15s_ease-out]">
+        <h3 class="text-lg font-semibold mb-2">${title}</h3>
+        <p class="text-sm text-gray-300 mb-6">${message}</p>
+        <div class="flex justify-end gap-3">
+          <button class="btn-cancel inline-flex items-center gap-2 px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg">
+            ❌ ${cancel}
+          </button>
+          <button class="btn-ok inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-semibold">
+            ✅ ${ok}
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+
+    const done = v => { wrap.remove(); resolve(v); };
+
+    wrap.querySelector('.btn-cancel').addEventListener('click', () => done(false));
+    wrap.querySelector('.btn-ok').addEventListener('click', () => done(true));
+    wrap.querySelector('.absolute').addEventListener('click', () => done(false));
+
+    const onKey = e => {
+      if (e.key === 'Escape') done(false);
+      if (e.key === 'Enter') done(true);
+    };
+    document.addEventListener('keydown', onKey, { once: true });
+  });
+}
+
+function showToast(message, type = 'success') {
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+
+  let icon = '';
+  if (type === 'success') {
+    icon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>`;
+  } else if (type === 'error') {
+    icon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>`;
+  } else {
+    icon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 20a8 8 0 100-16 8 8 0 000 16z" />
+            </svg>`;
+  }
+
+  toast.innerHTML = `${icon}<span>${message}</span>`;
+
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.remove();
+  }, 5000); // zmizí po 5s
+}
+
+
 // Funkce pro otevření modalu soutěží
 async function openCompetitionModal() {
     console.log("▶️ Otevírám modal soutěží");
@@ -127,7 +198,13 @@ function renderCompetitionList(competitions) {
         deleteBtn.title = 'Smazat';
         deleteBtn.className = 'hover:text-red-400';
         deleteBtn.addEventListener('click', async () => {
-            if (confirm(`Opravdu smazat soutěž "${c.name}"?`)) {
+            const ok = await confirmBox({
+                title: 'Smazání soutěže',
+                message: `Opravdu smazat soutěž "${c.name}"?`,
+                ok: 'Potvrdit',
+                cancel: 'Zrušit'
+            });
+            if (ok) {
                 console.log("Mazání soutěže ID:", c.id);
 
                 // 🔁 Přidej animaci skrytí před smazáním
@@ -198,7 +275,7 @@ function editCompetition(comp) {
         const time = document.getElementById('editCompTime').value;
         const type = document.getElementById('editCompType').value;
 
-        if (!name) return alert('Zadej název.');
+        if (!name) return showToast('Zadej název.', 'error');
 
 
         await window.electron.invoke('updateCompetition', {
@@ -349,7 +426,7 @@ function loadView(viewName) {
                 loadMeasurementCategories();
                 attachMeasurementListeners();
             }
-            if (viewName === 'results') {
+            if (viewName === 'results_app') {
                 loadResultsCategories();
             }
             if (viewName === 'dashboard') {
@@ -386,7 +463,7 @@ function attachNavbarListeners() {
             const type = document.getElementById('compType').value;
 
             if (!name) {
-                alert("Zadejte název soutěže.");
+                showToast('Zadejte název soutěže.', 'error');
                 return;
             }
 
@@ -459,23 +536,6 @@ function clearCompetitionForm() {
     document.getElementById('editCompTime').value = "";
     document.getElementById('editCompType').value = "";
 }
-
-function showToast(message, type = 'success') {
-    const toast = document.createElement('div');
-    toast.className = `px-4 py-2 rounded shadow text-white animate-fade-in-down ${
-        type === 'error' ? 'bg-red-600' : 'bg-green-600'
-    }`;
-    toast.textContent = message;
-
-    const container = document.getElementById('toastContainer');
-    container.appendChild(toast);
-
-    setTimeout(() => {
-        toast.classList.add('opacity-0', 'transition-opacity', 'duration-500');
-        setTimeout(() => toast.remove(), 500);
-    }, 2500);
-}
-
 
 function showSidebarFull() {
     document.querySelectorAll('.sidebar-link').forEach(link => {
@@ -705,13 +765,13 @@ function attachStartlistListeners() {
             const discipline = await getCurrentDiscipline();
 
             if (!competitionId || !categoryId) {
-                alert("Nejprve vyber soutěž a kategorii.");
+                showToast('Nejprve vyber soutěž a kategorii.', 'error');
                 return;
             }
 
             const success = await window.electron.invoke('importStartlistCsv', competitionId, categoryId, discipline);
             if (success) {
-                alert("Import CSV proběhl úspěšně.");
+                showToast('Import CSV proběhl úspěšně.', 'success');
                 categorySelect.dispatchEvent(new Event('change'));
             }
         });
@@ -724,13 +784,13 @@ function attachStartlistListeners() {
             const discipline = await getCurrentDiscipline();
 
             if (!competitionId || !categoryId) {
-                alert("Nejprve vyber soutěž a kategorii.");
+                showToast('Nejprve vyber soutěž a kategorii.', 'error');
                 return;
             }
 
             const success = await window.electron.invoke('importStartlistExcel', competitionId, categoryId, discipline);
             if (success) {
-                alert("Import Excelu proběhl úspěšně.");
+                showToast('Import Excelu proběhl úspěšně.', 'success');
                 categorySelect.dispatchEvent(new Event('change'));
             }
         });
@@ -752,7 +812,7 @@ function attachStartlistListeners() {
             );
 
             if (success) {
-                alert("Startovka vygenerována.");
+                showToast('Startovka vygenerována.', 'success');
                 categorySelect.dispatchEvent(new Event('change'));
             }
         });
@@ -765,7 +825,7 @@ function attachStartlistListeners() {
 
             const comp = window.allCompetitions.find(c => c.id == competitionId);
             if (!comp) {
-                alert("Nejprve vyber soutěž.");
+                showToast('Nejprve vyber soutěž.', 'error');
                 return;
             }
 
@@ -778,7 +838,7 @@ function attachStartlistListeners() {
             const categoryName = category?.name || null;
 
             if (!competitionId || !categoryId || !discipline) {
-                alert("Nejprve vyber soutěž a kategorii.");
+                showToast('Nejprve vyber soutěž a kategorii.', 'error');
                 return;
             }
 
@@ -790,8 +850,7 @@ function attachStartlistListeners() {
                 competitionId,
                 categoryId
             });
-
-            alert("Export do Excelu dokončen.");
+            showToast('Export do Excelu dokončen.', 'success');
         });
 
     }
@@ -978,7 +1037,13 @@ function attachStartlistListeners() {
 
 
                     tr.querySelector('.delete-row-btn').addEventListener('click', async () => {
-                        if (!confirm('Opravdu smazat tento tým?')) return;
+                        const ok = await confirmBox({
+                            title: 'Smazání týmu',
+                            message: `Opravdu smazat tento tým?`,
+                            ok: 'Potvrdit',
+                            cancel: 'Zrušit'
+                        });
+                        if (!ok) return;
                         await window.electron.invoke('deleteStartlistEntry', r.id);
                         tr.remove();
                     });
@@ -1058,7 +1123,13 @@ function attachStartlistListeners() {
 
 
                     tr.querySelector('.delete-row-btn').addEventListener('click', async () => {
-                        if (!confirm('Opravdu smazat tohoto závodníka?')) return;
+                        const ok = await confirmBox({
+                            title: 'Smazání závodníka',
+                            message: `Opravdu smazat tohoto závodníka?`,
+                            ok: 'Potvrdit',
+                            cancel: 'Zrušit'
+                        });
+                        if (!ok) return;
                         await window.electron.invoke('deleteStartlistEntry', r.id);
                         tr.remove();
                     });
@@ -1075,11 +1146,6 @@ function attachStartlistListeners() {
         setupStartlistSearch();
     }
 }
-
-document.getElementById('customModalCloseBtn').addEventListener('click', () => {
-    document.getElementById('customModal').classList.add('hidden');
-});
-
 
 async function getCurrentDiscipline() {
     const competitionId = localStorage.getItem('selectedCompetitionId');
@@ -1168,12 +1234,8 @@ async function loadMeasurementStartlist(competitionId, categoryId, discipline) {
               <span class="font-semibold tracking-wide">${r.team ?? ''}</span>
             </div>
           </td>
-          <td class="p-2 border border-gray-600 text-center w-48">
-            <div class="lp-time" contenteditable="true" spellcheck="false">${r.results[0].time_lp ?? '-'}</div>
-          </td>
-          <td class="p-2 border border-gray-600 text-center w-48">
-            <div class="pp-time" contenteditable="true" spellcheck="false">${r.results[0].time_pp ?? '-'}</div>
-          </td>
+          <td class="p-2 border border-gray-600 text-center lp-time w-48" contenteditable="true">${r.results[0].time_lp ?? '-'}</td>
+          <td class="p-2 border border-gray-600 text-center pp-time w-48" contenteditable="true">${r.results[0].time_pp ?? '-'}</td>
           <td class="p-2 border border-gray-600 text-center font-semibold result-time w-48">
             ${r.results[0].final_time ?? '-'}
           </td>
@@ -1342,11 +1404,6 @@ async function loadMeasurementStartlist(competitionId, categoryId, discipline) {
     }
 }
 
-
-function loadResultsCategories() {
-    loadCategoriesForSelectedCompetition();
-}
-
 async function loadDisplays() {
     const displays = await window.electron.invoke('getDisplays');
     const select = document.getElementById('displaySelect');
@@ -1416,7 +1473,7 @@ async function attachMeasurementListeners() {
     connectBtn?.addEventListener('click', async () => {
         const port = serialSelect?.value;
         if (!port) {
-            alert("Vyber nejdřív port!");
+            showToast('Vyber nejdřív port!', 'error');
             return;
         }
         await window.electron.invoke('openSerialPort', port);
@@ -1551,8 +1608,6 @@ async function attachMeasurementListeners() {
         }
     });
 
-    // SAVE button handler for Požární útok
-    // malý confirm modal (vrací true/false)
     async function confirmDanger({
                                      title = 'Změna výsledku',
                                      message = 'Opravdu přepsat uložený výsledek? Tato akce je nevratná.',
@@ -1607,7 +1662,7 @@ async function attachMeasurementListeners() {
             );
 
         if (!exists) {
-            alert('Pro tento tým zatím není uložen žádný výsledek.');
+            showToast('Pro tento tým zatím není uložen žádný výsledek.', 'error');
             return;
         }
 
@@ -1630,7 +1685,7 @@ async function attachMeasurementListeners() {
         }
 
         await loadMeasurementStartlist(competitionId, categoryId, 'Požární útok');
-        alert('Výsledek smazán.');
+        showToast('Výsledek smazán.', 'success');
     });
 
 
@@ -1692,7 +1747,7 @@ async function attachMeasurementListeners() {
             console.log('[saveResult] payload:', payload, '-> response:', res);
 
             if (!res?.success) {
-                alert('Uložení selhalo: ' + (res?.error || 'neznámá chyba'));
+                showToast('Uložení selhalo: ' + (res?.error || 'neznámá chyba'), 'error');
                 return;
             }
 
@@ -1706,10 +1761,10 @@ async function attachMeasurementListeners() {
             }
 
             await loadMeasurementStartlist(competitionId, categoryId, 'Požární útok');
-            alert(exists ? 'Výsledek přepsán.' : 'Výsledek uložen.');
+            showToast(exists ? 'Výsledek přepsán.' : 'Výsledek uložen.', 'success');
         } catch (err) {
             console.error('saveResult error:', err);
-            alert('Uložení selhalo (IPC). Mrkni do konzole.');
+            showToast('Uložení selhalo (IPC). Mrkni do konzole.', 'error');
         }
     });
 
@@ -1786,9 +1841,161 @@ async function attachMeasurementListeners() {
         for (const result of resultsToSave) {
             await window.electron.invoke('saveResult', result);
         }
-
-        alert('Výsledky uloženy!');
+        showToast('Výsledky uloženy!', 'success');
     });
 
 
+}
+
+async function loadResultsCategories() {
+  const competitionId = localStorage.getItem('selectedCompetitionId');
+  if (!competitionId) return;
+
+  const comp = window.allCompetitions?.find(c => c.id == competitionId);
+  if (!comp) return;
+
+  const discipline = comp.type; // 'Požární útok' | 'Běh'
+  const categories = await window.electron.invoke('getCategories', discipline);
+
+  const sel = document.getElementById('resultsCategorySelect');
+  if (!sel) return;
+
+  sel.innerHTML = `<option value="">Vyber kategorii</option>`;
+  categories.forEach(cat => {
+    const opt = document.createElement('option');
+    opt.value = cat.id;
+    opt.textContent = cat.name;
+    sel.appendChild(opt);
+  });
+
+  sel.addEventListener('change', async (e) => {
+    const categoryId = e.target.value;
+    if (!categoryId) {
+      document.getElementById('resultsRows').innerHTML = `
+        <tr id="resultsEmpty">
+          <td colspan="99" class="text-center py-8 text-slate-400">Zvol kategorii pro zobrazení výsledků.</td>
+        </tr>`;
+      return;
+    }
+    await renderResultsTable(competitionId, categoryId, discipline);
+  });
+
+  document.getElementById('exportResultsExcelBtn')?.addEventListener('click', async () => {
+    const categoryId = sel.value;
+    if (!categoryId) return showToast('Vyber kategorii.', 'error');
+
+    const comp2 = window.allCompetitions.find(c => c.id == competitionId);
+    const cats2 = await window.electron.invoke('getCategories', comp2.type);
+    const category = cats2.find(cat => cat.id == categoryId);
+
+    try {
+      await window.electron.invoke('exportResultsExcel', {
+        competitionId,
+        categoryId,
+        discipline,
+        competitionName: comp2.name,
+        competitionDate: comp2.date,
+        categoryName: category?.name
+      });
+      showToast('Export výsledků do Excelu dokončen.', 'success');
+    } catch {
+      showToast('Export do Excelu selhal.', 'error');
+    }
+  });
+
+  document.getElementById('exportResultsPdfBtn')?.addEventListener('click', async () => {
+    const categoryId = sel.value;
+    if (!categoryId) return showToast('Vyber kategorii.', 'error');
+
+    const comp2 = window.allCompetitions.find(c => c.id == competitionId);
+    const cats2 = await window.electron.invoke('getCategories', comp2.type);
+    const category = cats2.find(cat => cat.id == categoryId);
+
+    try {
+      await window.electron.invoke('exportResultsPdf', {
+        competitionId,
+        categoryId,
+        discipline,
+        competition: comp2,
+        categoryName: category?.name
+      });
+      showToast('Export výsledků do PDF dokončen.', 'success');
+    } catch {
+      showToast('Export do PDF selhal.', 'error');
+    }
+  });
+}
+
+
+async function renderResultsTable(competitionId, categoryId, discipline) {
+  const tbody = document.getElementById('resultsRows');
+  const thead = document.getElementById('resultsHead');
+  if (!tbody || !thead) return;
+
+  const rows = await window.electron.invoke('getStartlist', competitionId, categoryId);
+  const toBool = v => v === true || v === 1 || v === '1' || v === 'true';
+  const norm = v => (v == null || v === '' ? null : Number(v));
+
+  const data = rows.map(r => {
+    const res = r.results?.[0] || {};
+    const lp = norm(res.time_lp);
+    const pp = norm(res.time_pp);
+
+    // finální čas vždy ber z DB (fallback -> 999.999)
+    let final = norm(res.final_time);
+    if (!Number.isFinite(final)) final = 999.999;
+
+    // N: u útoku čistě podle res.is_n; jinde (běh) ber buď res.is_n nebo final >= 999.999
+    const isN = discipline === 'Požární útok'
+      ? toBool(res.is_n)
+      : (toBool(res.is_n) || (Number.isFinite(final) && final >= 999.999));
+
+    return {
+      id: r.id,
+      start: r.start_number ?? '',
+      name: r.name,
+      surname: r.surname,
+      team: r.team,
+      lp, pp, isN, final
+    };
+  });
+
+  // seřadit: menší final dřív, 999.999 (N/DNF) na konec
+  data.sort((a, b) => a.final - b.final);
+
+  // pořadí (tie = sdílené)
+  let place = 0, lastTime = null, idx = 0;
+  data.forEach(row => {
+    idx++;
+    if (row.final !== lastTime) {
+      place = idx;
+      lastTime = row.final;
+    }
+    row.place = Number.isFinite(row.final) && row.final < 999.999 ? place : '—';
+  });
+
+  // render
+  tbody.innerHTML = '';
+  if (!data.length) {
+    tbody.innerHTML = `
+      <tr id="resultsEmpty">
+        <td colspan="99" class="text-center py-8 text-slate-400">Žádné záznamy.</td>
+      </tr>`;
+    return;
+  }
+
+  for (const r of data) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="text-center">${r.start}</td>
+      <td>
+        ${r.team ? `<span class="font-semibold">${r.team}</span>` : `${r.name || ''} ${r.surname || ''}`}
+      </td>
+      <td class="text-center">${Number.isFinite(r.lp) ? r.lp.toFixed(2) : '—'}</td>
+      <td class="text-center">${Number.isFinite(r.pp) ? r.pp.toFixed(2) : '—'}</td>
+      <td class="text-center ${toBool(r.isN) ? 'text-red-400 font-semibold' : ''}">${Number.isFinite(r.final) && r.final < 999.999 ? r.final.toFixed(2) : '—'}</td>
+      <td class="text-center font-semibold">${r.place}</td>
+    `;
+    tbody.appendChild(tr);
+  }
 }

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8" />
+  <title>Výsledky</title>
+  <style>
+    :root{
+      --text:#1a1a1a; --muted:#666; --border:#ddd;
+      --brand:#0f766e; --brand-soft:#e6fffb; --row:#fafafa;
+    }
+    *{box-sizing:border-box}
+    body{font-family:Arial, sans-serif; color:var(--text); margin:0; -webkit-print-color-adjust:exact; print-color-adjust:exact}
+    .wrap{padding:20mm 12mm 16mm}
+    header{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid var(--brand);padding-bottom:8px;margin-bottom:10mm}
+    h1{margin:0;color:var(--brand);font-size:20px}
+    .meta{font-size:12px;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap}
+    .meta b{color:var(--text)}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    thead th{position:sticky;top:0;background:var(--brand-soft);color:#0b4f4a;border:1px solid var(--brand);padding:6px 8px;text-align:center;font-weight:700}
+    tbody td{border:1px solid var(--border);padding:6px 8px;text-align:center;vertical-align:middle}
+    tbody td:nth-child(3){text-align:left}
+    tbody tr:nth-child(odd) td{background:#fff}
+    tbody tr:nth-child(even) td{background:var(--row)}
+    thead{display:table-header-group} tfoot{display:table-footer-group}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Výsledky</h1>
+        <div class="meta">
+          <div><b>Soutěž:</b> {{competitionName}}</div>
+          <div><b>Datum:</b> {{date}}</div>
+        </div>
+      </div>
+      <div class="meta">
+        <div><b>Disciplína:</b> {{discipline}}</div>
+        <div><b>Kategorie:</b> {{category}}</div>
+      </div>
+    </header>
+
+    <table>
+      <thead><tr>{{thead}}</tr></thead>
+      <tbody>{{tbody}}</tbody>
+    </table>
+  </div>
+</body>
+</html>

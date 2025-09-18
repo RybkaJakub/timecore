@@ -15,9 +15,34 @@
   .table-scroll thead, .table-scroll tbody tr { display: table; width: 100%; table-layout: fixed; }
   .table-scroll thead th { position: sticky; top: 0; z-index: 2; background:#374151; }
   .table-scroll tbody { display:block; max-height:100%; overflow-y:auto; }
+  .toast {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .75rem 1rem;
+  border-radius: .65rem;
+  font-weight: 600;
+  color: #fff;
+  min-width: 240px;
+  max-width: 320px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.35);
+  animation: fadeIn .25s ease, fadeOut .3s ease 4.7s forwards;
+}
+.toast-success { background: #16a34a; } /* zelená */
+.toast-error   { background: #dc2626; } /* červená */
+.toast-info    { background: #2563eb; } /* modrá */
+
+.toast svg { flex-shrink: 0; width: 20px; height: 20px; }
+
+@keyframes fadeIn { from {opacity:0; transform:translateY(-10px);} to {opacity:1; transform:translateY(0);} }
+@keyframes fadeOut { to {opacity:0; transform:translateY(-10px);} }
+@keyframes pop {
+  from { transform: translateY(6px) scale(.97); opacity: 0 }
+  to   { transform: translateY(0)   scale(1);   opacity: 1 }
+}
+
 </style>
 <body class="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
-<div id="toastContainer" class="fixed top-5 right-5 z-50 space-y-2"></div>
 
   <!-- TOP NAVBAR -->
 <header class="w-full flex items-center justify-between bg-gray-800 px-4 py-3 shadow">
@@ -153,23 +178,7 @@
       </div>
     </div>
   </div>
-<!-- MODAL -->
-<div id="customModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 hidden">
-  <div class="bg-gray-800 text-white rounded-xl shadow-xl w-full max-w-md p-6 relative">
-    <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
-      ✅ <span id="customModalTitle">Úspěch</span>
-    </h2>
-    <p id="customModalMessage" class="mb-6"></p>
-    <div class="text-right">
-      <button id="customModalCloseBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
-        OK
-      </button>
-    </div>
-  </div>
-</div>
-
-
-
+<div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-3"></div>
 <script src="./js/renderer.js"></script>
 </body>
 </html>
