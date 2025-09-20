@@ -11,6 +11,7 @@ const store = new Store();
 const competitionsService = require('./services/competitionsService');
 const startlistService = require('./services/startlistService');
 const timerService = require('./services/timerService');
+const relayService = require('./services/relayService');
 
 let licenseWin;
 let splashWindow;
@@ -1160,353 +1161,406 @@ function normalizeResultRow(row, discipline) {
   };
 }
 
-// ============ RESULTS → PDF ============
-ipcMain.handle('exportResultsPdf', async (e, payload) => {
+const ExcelJS = require('exceljs');
+
+const qRun = (sql, p=[]) => new Promise((res,rej)=>db.run(sql,p,function(e){e?rej(e):res(this)}));
+const qAll = (sql, p=[]) => new Promise((res,rej)=>db.all(sql,p,(e,r)=>e?rej(e):res(r||[])));
+
+// ====== DATA SOURCES ======
+const getStartlist = (competitionId, categoryId) =>
+  new Promise((resolve,reject)=> startlistService.getStartlist(competitionId, categoryId, (e,r)=>e?reject(e):resolve(r||[])));
+
+const getResultsByStartlistIds = (ids) =>
+  new Promise((resolve,reject)=> {
+    if (!ids?.length) return resolve([]);
+    startlistService.getResultsByStartlistIds(ids, (e,r)=>e?reject(e):resolve(r||[]));
+  });
+
+const getRelayRows = (competitionId, categoryId) =>
+  new Promise((resolve,reject)=> relayService.listRowsWithRank(competitionId, categoryId, (e,r)=>e?reject(e):resolve(r||[])));
+
+// ====== RANKING HELPERS ======
+// seřadí s ohledem na OOC, vrátí place mapu (tie sdílené pořadí; jen ti s validRank=true)
+function rankByFinal(list, { getFinal, isRankEligible, isOOC }) {
+  // seřadit: OOC až nakonec, jinak podle final (null/NaN => 1000.00 = za všechny)
+  const norm = v => (Number.isFinite(v) ? v : 1000.00); // 1000 > 999.99
+  const arr = [...list].sort((a,b)=>{
+    const ao = !!isOOC(a), bo = !!isOOC(b);
+    if (ao!==bo) return ao?1:-1;
+    return norm(getFinal(a)) - norm(getFinal(b));
+  });
+
+  const placeMap = new Map();
+  let place = 0, last = null, idx = 0;
+  for (const x of arr) {
+    idx++;
+    const final = getFinal(x);
+    const eligible = isRankEligible(x) && !isOOC(x);
+    const key = norm(final);
+    if (eligible) {
+      if (key !== last) { place = idx; last = key; }
+      placeMap.set(x, place);
+    } else {
+      placeMap.set(x, '—');
+    }
+  }
+  return { sorted: arr, placeMap };
+}
+
+// ====== MODE: ATTACK ======
+async function buildAttackRows(competitionId, categoryId) {
+  const start = await getStartlist(competitionId, categoryId);
+  const ids   = start.map(s=>s.id);
+  const res   = await getResultsByStartlistIds(ids);
+  const byId  = Object.fromEntries(res.map(r=>[r.startlist_id, r]));
+
+  const rows = start.map(s=>{
+    const r = byId[s.id] || {};
+    const lp = toNum(r.time_lp);
+    const pp = toNum(r.time_pp);
+    const isN = toBool(r.is_n);
+    // Final: když N => 999.99; když má final_time, ber ho; jinak null (žádný čas)
+    let final = toNum(r.final_time);
+    if (isN) final = 999.99;
+    if (!isN && !Number.isFinite(final)) final = (Number.isFinite(lp)||Number.isFinite(pp)) ? toNum(r.final_time) : null;
+
+    return {
+      id:s.id, start:s.start_number??'', who: s.team ?? `${s.name||''} ${s.surname||''}`.trim(),
+      ooc: toBool(s.out_of_competition),
+      lp, pp, isN, final
+    };
+  });
+
+  const { sorted, placeMap } = rankByFinal(rows, {
+    getFinal: r => (r.isN ? 999.99 : r.final),
+    isRankEligible: r => Number.isFinite(r.final) && r.final < 999.99 && !r.isN,
+    isOOC: r => r.ooc
+  });
+
+  return sorted.map(r=>({
+    ...r,
+    place: placeMap.get(r)
+  }));
+}
+
+// ====== MODE: RELAY ======
+async function buildRelayRows(competitionId, categoryId) {
+  const rows  = await getRelayRows(competitionId, categoryId);
+  const start = await getStartlist(competitionId, categoryId);
+  const oocMap = new Map(start.map(s=>[s.id, toBool(s.out_of_competition)]));
+
+  const prepared = rows.map(r=>{
+    const a1 = toNum(r.attempt1_time);
+    const a2 = toNum(r.attempt2_time);
+    const v1 = (r.attempt1_valid !== 0);
+    const v2 = (r.attempt2_valid !== 0);
+    const show1 = v1 ? a1 : 999.99;   // N -> 999.99 v tabulce
+    const show2 = v2 ? a2 : 999.99;
+    let final = toNum(r.final_time);
+    if (!Number.isFinite(final)) {
+      // když nemáme nic (obě N nebo bez času), final = 999.99 jen pro řazení na konec
+      final = (v1||v2) ? null : 999.99;
+    }
+    // když jsou oba N, final = 999.99 kvůli řazení
+    if (!v1 && !v2) final = 999.99;
+
+    return {
+      id:r.startlist_id, start:r.start_number??'', who:r.team??'',
+      ooc: oocMap.get(r.startlist_id) || false,
+      a1: show1, a2: show2, final
+    };
+  });
+
+  const { sorted, placeMap } = rankByFinal(prepared, {
+    getFinal: r => r.final,
+    isRankEligible: r => Number.isFinite(r.final) && r.final < 999.99,
+    isOOC: r => r.ooc
+  });
+
+  return sorted.map(r=>({ ...r, place: placeMap.get(r) }));
+}
+
+// ====== MODE: OVERALL ======
+async function buildOverallRows(competitionId, categoryId) {
+  const attack = await buildAttackRows(competitionId, categoryId);
+  const relay  = await buildRelayRows(competitionId, categoryId);
+
+  const aRank = new Map(attack.map(r=>[r.id, (typeof r.place==='number') ? r.place : null]));
+  const rRank = new Map(relay.map(r=>[r.id,  (typeof r.place==='number') ? r.place : null]));
+  const ooc   = new Map(attack.map(r=>[r.id, !!r.ooc])); // startlist je stejný
+
+  // max rank pro penalizaci „bez disciplíny“
+  const maxRank = Math.max(
+    ...[...aRank.values(), ...rRank.values()].filter(n => Number.isFinite(n)),
+    0
+  ) || 0;
+
+  // spoj
+  const pool = new Map();
+  // jména/start vezmu z útoku/relaye podle dostupnosti
+  for (const x of attack) pool.set(x.id, { id:x.id, start:x.start, who:x.who, ooc:x.ooc, aPlace:aRank.get(x.id) ?? null, rPlace:null });
+  for (const y of relay) {
+    const t = pool.get(y.id) || { id:y.id, start:y.start, who:y.who, ooc: y.ooc, aPlace:null, rPlace:null };
+    // preferuj who/start z útoku, jinak doplň z relaye
+    if (!t.who)   t.who = y.who;
+    if (!t.start) t.start = y.start;
+    t.rPlace = rRank.get(y.id) ?? null;
+    pool.set(y.id, t);
+  }
+
+  const rows = [...pool.values()].map(r=>{
+    const a = r.aPlace, rr = r.rPlace;
+    const sum = r.ooc ? Infinity : ((a ?? (maxRank+1)) + (rr ?? (maxRank+1)));
+    return { ...r, sum };
+  });
+
+  // seřadit OOC poslední, jinak podle sum
+  rows.sort((x,y)=>{
+    if (!!x.ooc !== !!y.ooc) return x.ooc ? 1 : -1;
+    return x.sum - y.sum;
+  });
+
+  // přiděl „celkové pořadí“ (bez OOC a pouze čísla)
+  let place=0, last=null, idx=0;
+  for (const r of rows) {
+    idx++;
+    if (r.ooc || !Number.isFinite(r.sum)) { r.overall='—'; continue; }
+    if (r.sum !== last) { place = idx; last = r.sum; }
+    r.overall = place;
+  }
+
+  return rows;
+}
+
+// ====== PDF ======
+ipcMain.handle('exportResultsPdf', async (_e, payload={}) => {
   const {
     competitionId,
     categoryId,
-    discipline,        // 'Požární útok' | 'Běh'
-    competition,       // { name, date }
+    mode,                 // 'attack' | 'relay' | 'overall'
+    relayType,            // '4x60' | 'pairs' (jen pro titulek)
+    competition,          // { name, date }
     categoryName
-  } = payload || {};
+  } = payload;
 
-  if (!competitionId || !categoryId) return false;
+  if (!competitionId || !categoryId || !mode) return false;
 
-  // -- pomocné promise wrapy na služby --
-  const getStartlistPromise = (cid, cat) => new Promise((resolve, reject) => {
-    startlistService.getStartlist(cid, cat, (err, rows) => err ? reject(err) : resolve(rows || []));
-  });
-  const getResultsByStartlistIdsPromise = (ids) => new Promise((resolve, reject) => {
-    if (!Array.isArray(ids) || !ids.length) return resolve([]);
-    startlistService.getResultsByStartlistIds(ids, (err, rows) => err ? reject(err) : resolve(rows || []));
-  });
-
-  // -- merge startlist + results --
-  async function getStartlistWithResults(cid, cat) {
-    const startlist = await getStartlistPromise(cid, cat);
-    const ids = startlist.map(r => r.id);
-    const results = await getResultsByStartlistIdsPromise(ids);
-    const byId = {};
-    for (const r of results) byId[r.startlist_id] = r;
-    return startlist.map(s => {
-      const res = byId[s.id] || {};
-      return {
-        id: s.id,
-        start_number: s.start_number ?? null,
-        team: s.team ?? null,
-        name: s.name ?? null,
-        surname: s.surname ?? null,
-        heat: s.heat ?? null,
-        lane: s.lane ?? null,
-        // results
-        result_id: res.id ?? null,
-        time_lp: res.time_lp ?? null,
-        time_pp: res.time_pp ?? null,
-        time_first: res.time_first ?? null,
-        time_second: res.time_second ?? null,
-        is_n: res.is_n ?? null,
-        is_n_first: res.is_n_first ?? 0,
-        is_n_second: res.is_n_second ?? 0,
-        final_time: res.final_time ?? null
-      };
-    });
+  // data + hlavička sloupců
+  let headers = [], rows = [];
+  if (mode === 'attack') {
+    headers = ['Pořadí', 'Start. č.', 'Tým / Jméno', 'LP', 'PP', 'Výsledek', 'N'];
+    const data = await buildAttackRows(competitionId, categoryId);
+    rows = data.map(r => ([
+      (typeof r.place==='number') ? r.place : '—',
+      r.start ?? '',
+      r.who ?? '',
+      Number.isFinite(r.lp) ? r.lp.toFixed(2) : '—',
+      Number.isFinite(r.pp) ? r.pp.toFixed(2) : '—',
+      (Number.isFinite(r.final) && r.final < 999.99) ? r.final.toFixed(2) : (r.isN ? '999.99' : '—'),
+      (r.isN || (Number.isFinite(r.final) && r.final >= 999.99)) ? 'N' : ''
+    ]));
+  } else if (mode === 'relay') {
+    headers = ['Pořadí', 'Start. č.', 'Tým', '1. pokus', '2. pokus', 'Výsledek'];
+    const data = await buildRelayRows(competitionId, categoryId);
+    rows = data.map(r => ([
+      (typeof r.place==='number') ? r.place : '—',
+      r.start ?? '',
+      r.who ?? '',
+      Number.isFinite(r.a1) ? r.a1.toFixed(2) : '—',
+      Number.isFinite(r.a2) ? r.a2.toFixed(2) : '—',
+      (Number.isFinite(r.final) && r.final < 999.99) ? r.final.toFixed(2) : '999.99'
+    ]));
+  } else { // overall
+    headers = ['Celkové pořadí', 'Start. č.', 'Tým', 'Pořadí útok', 'Pořadí štafeta', 'Součet'];
+    const data = await buildOverallRows(competitionId, categoryId);
+    rows = data.map(r => ([
+      (typeof r.overall==='number') ? r.overall : '—',
+      r.start ?? '',
+      r.who ?? '',
+      r.aPlace ?? '—',
+      r.rPlace ?? '—',
+      Number.isFinite(r.sum) ? r.sum : '—'
+    ]));
   }
 
-  const toNum = v => (v == null || v === '' ? null : Number(v));
-  const toBool = v => v === true || v === 1 || v === '1' || v === 'true';
-
-  function normalizeResultRow(row, discipline) {
-    const lp = toNum(row.time_lp);
-    const pp = toNum(row.time_pp);
-
-    // finál bereme z DB (když tam není, 999.999 kvůli setřídění na konec)
-    let final = toNum(row.final_time);
-    if (!Number.isFinite(final)) final = 999.999;
-
-    // N: u útoku dle is_n; u běhu dle is_n || final>=999.999
-    const isN = (discipline === 'Požární útok')
-      ? toBool(row.is_n)
-      : (toBool(row.is_n) || (Number.isFinite(final) && final >= 999.999));
-
-    const who = row.team
-      ? row.team
-      : [row.name || '', row.surname || ''].join(' ').trim();
-
-    return { start: row.start_number ?? '', who, lp, pp, final, isN };
-  }
-
-  // --- data ---
-  const merged = await getStartlistWithResults(competitionId, categoryId);
-  const prepared = merged.map(r => normalizeResultRow(r, discipline));
-
-  // seřazení + pořadí
-  prepared.sort((a, b) => a.final - b.final);
-  let place = 0, last = null, idx = 0;
-  prepared.forEach(row => {
-    idx++;
-    if (row.final !== last) { place = idx; last = row.final; }
-    row.place = (Number.isFinite(row.final) && row.final < 999.999) ? place : '—';
-  });
-
-  // --- HTML šablona (results_template.html) ---
+  // === šablona ===
   const templatePath = path.join(app.getAppPath(), 'src', 'assets', 'results_template.html');
-  if (!fs.existsSync(templatePath)) { console.error('Results template not found:', templatePath); return false; }
+  if (!fs.existsSync(templatePath)) {
+    console.error('Missing template:', templatePath);
+    return false;
+  }
   let html = fs.readFileSync(templatePath, 'utf-8');
 
-  const headers = ['Pořadí', 'Start. č.', 'Tým / Jméno', 'LP', 'PP', 'Výsledek', 'N'];
   const theadHtml = headers.map(h => `<th>${escapeHtml(h)}</th>`).join('');
-  const rowsHtml = prepared.map(r => `
-    <tr>
-      <td>${r.place}</td>
-      <td>${escapeHtml(String(r.start))}</td>
-      <td style="text-align:left">${escapeHtml(r.who || '')}</td>
-      <td>${Number.isFinite(r.lp) ? r.lp.toFixed(2) : '—'}</td>
-      <td>${Number.isFinite(r.pp) ? r.pp.toFixed(2) : '—'}</td>
-      <td>${(Number.isFinite(r.final) && r.final < 999.999) ? r.final.toFixed(2) : '—'}</td>
-      <td>${(r.isN || r.final >= 999.999) ? 'N' : ''}</td>
-    </tr>
-  `).join('');
+  const rowsHtml  = rows.map(cols => `<tr>${cols.map(c=>`<td>${escapeHtml(String(c))}</td>`).join('')}</tr>`).join('');
 
   const compName = competition?.name || '';
   const eventDate = formatCzDate(competition?.date);
+  const discText = mode==='attack' ? 'Požární útok'
+                  : mode==='relay' ? (relayType==='pairs' ? 'Štafeta dvojic' : 'Štafeta 4×60')
+                  : 'Celkové výsledky';
 
   html = html
     .replace(/{{\s*competitionName\s*}}/g, escapeHtml(compName))
     .replace(/{{\s*date\s*}}/g, escapeHtml(eventDate))
-    .replace(/{{\s*discipline\s*}}/g, escapeHtml(discipline || ''))
+    .replace(/{{\s*discipline\s*}}/g, escapeHtml(discText))
     .replace(/{{\s*category\s*}}/g, escapeHtml(categoryName || ''))
     .replace(/{{\s*thead\s*}}/g, theadHtml)
     .replace(/{{\s*tbody\s*}}/g, rowsHtml);
 
-  // --- PDF render (Puppeteer) ---
+  // PDF
   let browser;
   try {
-    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--font-render-hinting=medium'] });
+    browser = await puppeteer.launch({ headless:true, args:['--no-sandbox'] });
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
+    await page.setContent(html, { waitUntil:'networkidle0' });
     await page.emulateMediaType('print');
 
     const { headerTemplate, footerTemplate } = buildHeaderFooterTemplates({
       titleLeft: compName,
-      titleRight: `${discipline}${categoryName ? ' • ' + categoryName : ''}`
+      titleRight: `${discText}${categoryName ? ' • ' + categoryName : ''}`
     });
 
-    const safeName = [
-      'Výsledky',
-      compName && compName.replace(/[\\/:*?"<>|]+/g, ' '),
-      discipline && discipline.replace(/[\\/:*?"<>|]+/g, ' '),
-      categoryName && categoryName.replace(/[\\/:*?"<>|]+/g, ' '),
-      eventDate
-    ].filter(Boolean).join(' - ');
-
+    const safe = s => (s||'').toString().replace(/[\\/:*?"<>|]+/g,' ').trim();
     const { filePath } = await dialog.showSaveDialog({
       title: 'Uložit PDF',
-      defaultPath: `${safeName}.pdf`,
-      filters: [{ name: 'PDF', extensions: ['pdf'] }]
+      defaultPath: `${safe('Výsledky')} - ${safe(compName)} - ${safe(discText)} - ${safe(categoryName)} - ${eventDate}.pdf`,
+      filters: [{ name:'PDF', extensions:['pdf'] }]
     });
     if (!filePath) { await browser.close(); return false; }
 
     await page.pdf({
-      path: filePath,
-      format: 'A4',
-      landscape: false,
-      printBackground: true,
-      margin: { top: '18mm', bottom: '18mm', left: '12mm', right: '12mm' },
-      displayHeaderFooter: true,
-      headerTemplate,
-      footerTemplate
+      path: filePath, format:'A4', printBackground:true,
+      margin:{ top:'18mm', bottom:'18mm', left:'12mm', right:'12mm' },
+      displayHeaderFooter:true, headerTemplate, footerTemplate
     });
 
     await browser.close();
     return true;
   } catch (err) {
     console.error('exportResultsPdf error:', err);
-    if (browser) try { await browser.close(); } catch {}
+    if (browser) try{ await browser.close(); }catch{}
     return false;
   }
 });
 
-
-// ============ RESULTS → EXCEL ============
-ipcMain.handle('exportResultsExcel', async (e, payload) => {
+// ====== EXCEL ======
+ipcMain.handle('exportResultsExcel', async (_e, payload={}) => {
   const {
     competitionId,
     categoryId,
-    discipline,              // 'Požární útok' | 'Běh'
+    mode,                 // 'attack' | 'relay' | 'overall'
+    relayType,
     competitionName,
     competitionDate,
     categoryName
-  } = payload || {};
+  } = payload;
 
-  if (!competitionId || !categoryId) return false;
+  if (!competitionId || !categoryId || !mode) return false;
 
-  // -- pomocné promise wrapy --
-  const getStartlistPromise = (cid, cat) => new Promise((resolve, reject) => {
-    startlistService.getStartlist(cid, cat, (err, rows) => err ? reject(err) : resolve(rows || []));
-  });
-  const getResultsByStartlistIdsPromise = (ids) => new Promise((resolve, reject) => {
-    if (!Array.isArray(ids) || !ids.length) return resolve([]);
-    startlistService.getResultsByStartlistIds(ids, (err, rows) => err ? reject(err) : resolve(rows || []));
-  });
-
-  async function getStartlistWithResults(cid, cat) {
-    const startlist = await getStartlistPromise(cid, cat);
-    const ids = startlist.map(r => r.id);
-    const results = await getResultsByStartlistIdsPromise(ids);
-    const byId = {};
-    for (const r of results) byId[r.startlist_id] = r;
-    return startlist.map(s => {
-      const res = byId[s.id] || {};
-      return {
-        id: s.id,
-        start_number: s.start_number ?? null,
-        team: s.team ?? null,
-        name: s.name ?? null,
-        surname: s.surname ?? null,
-        time_lp: res.time_lp ?? null,
-        time_pp: res.time_pp ?? null,
-        is_n: res.is_n ?? null,
-        final_time: res.final_time ?? null
-      };
-    });
+  // data + hlavičky
+  let headers = [], rows = [];
+  if (mode === 'attack') {
+    headers = ['Pořadí', 'Start. č.', 'Tým / Jméno', 'LP', 'PP', 'Výsledek', 'N'];
+    const data = await buildAttackRows(competitionId, categoryId);
+    rows = data.map(r => ([
+      (typeof r.place==='number') ? r.place : '—',
+      r.start ?? '',
+      r.who ?? '',
+      Number.isFinite(r.lp) ? r.lp.toFixed(2) : '—',
+      Number.isFinite(r.pp) ? r.pp.toFixed(2) : '—',
+      (Number.isFinite(r.final) && r.final < 999.99) ? r.final.toFixed(2) : (r.isN ? '999.99' : '—'),
+      (r.isN || (Number.isFinite(r.final) && r.final >= 999.99)) ? 'N' : ''
+    ]));
+  } else if (mode === 'relay') {
+    headers = ['Pořadí', 'Start. č.', 'Tým', '1. pokus', '2. pokus', 'Výsledek'];
+    const data = await buildRelayRows(competitionId, categoryId);
+    rows = data.map(r => ([
+      (typeof r.place==='number') ? r.place : '—',
+      r.start ?? '',
+      r.who ?? '',
+      Number.isFinite(r.a1) ? r.a1.toFixed(2) : '—',
+      Number.isFinite(r.a2) ? r.a2.toFixed(2) : '—',
+      (Number.isFinite(r.final) && r.final < 999.99) ? r.final.toFixed(2) : '999.99'
+    ]));
+  } else {
+    headers = ['Celkové pořadí', 'Start. č.', 'Tým', 'Pořadí útok', 'Pořadí štafeta', 'Součet'];
+    const data = await buildOverallRows(competitionId, categoryId);
+    rows = data.map(r => ([
+      (typeof r.overall==='number') ? r.overall : '—',
+      r.start ?? '',
+      r.who ?? '',
+      r.aPlace ?? '—',
+      r.rPlace ?? '—',
+      Number.isFinite(r.sum) ? r.sum : '—'
+    ]));
   }
-
-  const toNum = v => (v == null || v === '' ? null : Number(v));
-  const toBool = v => v === true || v === 1 || v === '1' || v === 'true';
-  const clean = v => (v==null ? '' : String(v)).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
-  const safeFs = s => (s||'').toString().replace(/[\\/:*?"<>|]+/g,' ').trim();
-  const czDate = d => {
-    if (!d) return '';
-    const dt = (d instanceof Date) ? d : new Date(d);
-    return dt.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'long', year: 'numeric' });
-  };
-
-  function normalizeResultRow(row) {
-    const lp = toNum(row.time_lp);
-    const pp = toNum(row.time_pp);
-    let final = toNum(row.final_time);
-    if (!Number.isFinite(final)) final = 999.999;
-    const isN = (discipline === 'Požární útok')
-      ? toBool(row.is_n)
-      : (toBool(row.is_n) || (Number.isFinite(final) && final >= 999.999));
-    const who = row.team
-      ? row.team
-      : [row.name || '', row.surname || ''].join(' ').trim();
-    return {
-      start: row.start_number ?? '',
-      who, lp, pp, final, isN
-    };
-  }
-
-  // --- data ---
-  const merged = await getStartlistWithResults(competitionId, categoryId);
-  const prepared = merged.map(normalizeResultRow);
-
-  prepared.sort((a, b) => a.final - b.final);
-  let place = 0, last = null, idx = 0;
-  prepared.forEach(row => {
-    idx++;
-    if (row.final !== last) { place = idx; last = row.final; }
-    row.place = (Number.isFinite(row.final) && row.final < 999.999) ? place : '—';
-  });
-
-  const headers = ['Pořadí', 'Start. č.', 'Tým / Jméno', 'LP', 'PP', 'Výsledek', 'N'];
-  const rows = prepared.map(r => ([
-    r.place,
-    r.start,
-    r.who,
-    Number.isFinite(r.lp) ? r.lp.toFixed(2) : '—',
-    Number.isFinite(r.pp) ? r.pp.toFixed(2) : '—',
-    (Number.isFinite(r.final) && r.final < 999.999) ? r.final.toFixed(2) : '—',
-    (r.isN || r.final >= 999.999) ? 'N' : ''
-  ]));
 
   try {
+    // Workbook
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'TimeCore';
+    const ws = wb.addWorksheet((() => {
+      const d = (mode==='attack') ? 'Útok' : (mode==='relay' ? (relayType==='pairs'?'Štafeta dvojic':'Štafeta 4×60') : 'Celkové');
+      return ([d, categoryName].filter(Boolean).join(' • ') || 'Výsledky').slice(0,31);
+    })());
+
+    // Titulek + meta
+    const title = ([ 'Výsledky',
+      competitionName,
+      (mode==='attack') ? 'Požární útok' : (mode==='relay' ? (relayType==='pairs'?'Štafeta dvojic':'Štafeta 4×60') : 'Celkové výsledky'),
+      categoryName, formatCzDate(competitionDate) ]).filter(Boolean).join(' – ');
+
+    ws.mergeCells(1,1,1,headers.length);
+    ws.getCell(1,1).value = title;
+    ws.getCell(1,1).font  = { name:'Arial', size:16, bold:true };
+    ws.getCell(1,1).alignment = { vertical:'middle', horizontal:'left' };
+    ws.addRow([]);
+
+    ws.addRow(headers);
+    const headRow = ws.getRow(ws.lastRow.number);
+    headRow.eachCell(c => {
+      c.font = { name:'Arial', size:10, bold:true };
+      c.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
+      c.fill = { type:'pattern', pattern:'solid', fgColor:{ argb:'FF0F172A' } };
+      c.font = { name:'Arial', size:10, bold:true, color:{ argb:'FFCBD5E1' } };
+      c.border = { top:{style:'thin'}, left:{style:'thin'}, right:{style:'thin'}, bottom:{style:'thin'} };
+    });
+
+    rows.forEach(r=>{
+      const row = ws.addRow(r);
+      row.eachCell(c=>{
+        c.font = { name:'Arial', size:10 };
+        c.alignment = { vertical:'middle', horizontal:'center' };
+        c.border = { top:{style:'thin'}, left:{style:'thin'}, right:{style:'thin'}, bottom:{style:'thin'} };
+      });
+      // Sloupec „Tým / Jméno“ resp. „Tým“ do leva
+      const idxText = (mode==='overall') ? 3 : 3;
+      row.getCell(idxText).alignment = { vertical:'middle', horizontal:'left' };
+    });
+
+    // Auto width
+    const colCount = headers.length;
+    for (let c=1; c<=colCount; c++){
+      let max=0;
+      ws.eachRow({ includeEmpty:true }, row=>{
+        const cell = row.getCell(c);
+        const v = String(cell.value ?? '');
+        max = Math.max(max, v.length);
+      });
+      ws.getColumn(c).width = Math.min(Math.max(max + 2, 10), 40);
+    }
+
+    const safe = s => (s||'').toString().replace(/[\\/:*?"<>|]+/g,' ').trim();
     const { canceled, filePath } = await dialog.showSaveDialog({
       title: 'Uložit výsledky',
       defaultPath: path.join(
         app.getPath('documents'),
-        ['Výsledky', safeFs(competitionName), safeFs(discipline), safeFs(categoryName), czDate(competitionDate)]
-          .filter(Boolean).join(' - ') + '.xlsx'
+        `${safe('Výsledky')} - ${safe(competitionName)} - ${safe((mode==='attack')?'Požární útok':(mode==='relay'?(relayType==='pairs'?'Štafeta dvojic':'Štafeta 4×60'):'Celkové výsledky'))} - ${safe(categoryName)} - ${formatCzDate(competitionDate)}.xlsx`
       ),
       filters: [{ name:'Excel', extensions:['xlsx'] }]
     });
     if (canceled || !filePath) return false;
-
-    // Workbook & sheet
-    const wb = new ExcelJS.Workbook();
-    wb.creator = 'TimeCore';
-    const sheetName = ([discipline, categoryName].filter(Boolean).join(' • ') || 'Výsledky').slice(0,31);
-    const ws = wb.addWorksheet(sheetName);
-
-    const colCount = headers.length;
-
-    // Ř.1: „Výsledky“
-    ws.mergeCells(1,1,1,colCount);
-    const title = ws.getCell(1,1);
-    title.value = 'Výsledky';
-    title.font = { name: 'Arial', size: 18, bold: true, color: { argb: BRAND } };
-    title.alignment = { horizontal: 'left', vertical: 'middle' };
-    ws.getRow(1).height = 24;
-
-    // Ř.2: meta
-    ws.mergeCells(2,1,2,colCount);
-    const meta = ws.getCell(2,1);
-    meta.value = clean(
-      `Soutěž: ${competitionName || ''}    Datum: ${czDate(competitionDate)}    ` +
-      `Disciplína: ${discipline || ''}    Kategorie: ${categoryName || ''}`
-    );
-    meta.font = { name: 'Arial', size: 11, color: { argb: 'FF666666' } };
-    meta.alignment = { horizontal: 'left', vertical: 'middle' };
-    for (let c = 1; c <= colCount; c++) {
-      ws.getCell(2, c).border = { bottom: { style: 'medium', color: { argb: BRAND } } };
-    }
-
-    // Ř.3: mezera
-    ws.addRow([]);
-
-    // Ř.4: hlavička tabulky
-    ws.addRow(headers);
-    const headRowIdx = 4;
-    const head = ws.getRow(headRowIdx);
-    head.height = 20;
-    head.eachCell(cell => {
-      cell.font = { name: 'Arial', size: 9, bold: true };
-      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEAD_BG } };
-      cell.border = {
-        top: { style: 'thin', color: { argb: BRAND } },
-        left:{ style: 'thin', color: { argb: BRAND } },
-        right:{ style: 'thin', color: { argb: BRAND } },
-        bottom:{ style: 'thin', color: { argb: BRAND } }
-      };
-    });
-
-    // Data rows
-    rows.forEach(r => {
-      const row = ws.addRow(r);
-      row.eachCell(cell => {
-        cell.font = { name: 'Arial', size: 9 };
-        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-        cell.border = {
-          top: { style: 'thin', color: { argb: GRID } },
-          left:{ style: 'thin', color: { argb: GRID } },
-          right:{ style: 'thin', color: { argb: GRID } },
-          bottom:{ style: 'thin', color: { argb: GRID } }
-        };
-      });
-      // „Tým / Jméno“ zarovnat doleva
-      row.getCell(3).alignment = { vertical:'middle', horizontal:'left', wrapText: true };
-    });
-
-    // Autofit + tisk
-    autoWidth(ws);
-    ws.pageSetup = {
-      orientation: (headers.length >= 7) ? 'landscape' : 'portrait',
-      fitToPage: true, fitToWidth: 1, fitToHeight: 0,
-      margins: { left:0.35, right:0.35, top:0.5, bottom:0.5, header:0.2, footer:0.2 },
-      printTitlesRow: `1:${headRowIdx}`
-    };
 
     await wb.xlsx.writeFile(filePath);
     return true;
@@ -1514,4 +1568,48 @@ ipcMain.handle('exportResultsExcel', async (e, payload) => {
     console.error('exportResultsExcel error:', err);
     return false;
   }
+});
+
+
+const cbp = (fn) => (...args) => new Promise((resolve, reject) => {
+  fn(...args, (err, data) => err ? reject(err) : resolve(data));
+});
+
+// typ štafety
+ipcMain.handle('relay:getType', cbp((e, { competitionId }, cb) =>
+  relayService.getCompetitionRelayType(competitionId, cb)
+));
+ipcMain.handle('relay:setType', cbp((e, { competitionId, type }, cb) =>
+  relayService.setCompetitionRelayType(competitionId, type, cb)
+));
+
+// načtení řádků do tabulky (2 řádky na tým)
+ipcMain.handle('relay:listRows', cbp((e, { competitionId, categoryId }, cb) =>
+  relayService.listRowsWithRank(competitionId, categoryId, cb) // rank se už neukazuje, ale nechal jsem kompatibilní
+));
+
+// uložení jednoho pokusu (upsert + přepočet final)
+ipcMain.handle('relay:savePartial', cbp((e, payload, cb) =>
+  relayService.upsertRelayPartial(payload, cb)
+));
+
+const runP = (sql, params=[]) => new Promise((resolve, reject) => {
+  db.run(sql, params, function (err) { err ? reject(err) : resolve(this); });
+});
+
+// tichá migrace – přidá sloupec, když chybí (ignoruje chybu, pokud už existuje)
+async function ensureStartlistOOCColumn() {
+  try {
+    await runP(`ALTER TABLE startlist ADD COLUMN out_of_competition INTEGER DEFAULT 0`);
+  } catch (_) {
+    // sloupec už pravděpodobně existuje -> ignoruj
+  }
+}
+
+// IPC handler – nastaví/odnastaví OOC pro konkrétní startlist_id
+ipcMain.handle('startlist:setOOC', async (_e, { startlist_id, value }) => {
+  if (!startlist_id) throw new Error('startlist_id is required');
+  await ensureStartlistOOCColumn();
+  await runP(`UPDATE startlist SET out_of_competition = ? WHERE id = ?`, [value ? 1 : 0, startlist_id]);
+  return true;
 });

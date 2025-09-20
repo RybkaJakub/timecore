@@ -411,7 +411,6 @@ function renderDashboardCompetitionInfo() {
     infoBox.classList.remove('hidden');
 }
 
-
 function loadView(viewName) {
     fetch(`views/${viewName}.html`)
         .then(res => res.text())
@@ -428,11 +427,16 @@ function loadView(viewName) {
             }
             if (viewName === 'results_app') {
                 loadResultsCategories();
+                attachResultsListeners();
             }
             if (viewName === 'dashboard') {
                 renderDashboardCompetitionInfo();
                 const element = document.querySelector('[data-view="dashboard"]');
                 setActiveLink(element);
+            }
+            if (viewName === 'relay') {
+                loadRelayCategories();
+                attachRelayListeners();
             }
 
         });
@@ -1847,19 +1851,65 @@ async function attachMeasurementListeners() {
 
 }
 
+// ===== stav + util =====
+const MODE_ATTACK = 'attack';
+const MODE_RELAY  = 'relay';
+const MODE_OVERALL = 'overall';
+let ACTIVE_MODE = MODE_ATTACK;
+
+const cid = () => localStorage.getItem('selectedCompetitionId');
+const nOrNull = v => (v==null || v==='') ? null : Number(v);
+const fmt = v => (Number.isFinite(v) ? v.toFixed(2) : '—');
+
+function setActiveTab(mode){
+  ACTIVE_MODE = mode;
+  document.getElementById('tabAttack') .classList.toggle('active', mode===MODE_ATTACK);
+  document.getElementById('tabRelay')  .classList.toggle('active', mode===MODE_RELAY);
+  document.getElementById('tabOverall').classList.toggle('active', mode===MODE_OVERALL);
+  renderHead();
+  refreshResultsTable();
+}
+
+function renderHead(){
+  const h = document.querySelector('#resultsHead tr');
+  if (!h) return;
+  if (ACTIVE_MODE===MODE_ATTACK){
+    h.innerHTML = `
+      <th class="w-20">Start. č.</th>
+      <th class="w-64">Tým</th>
+      <th class="w-24">OOC</th>
+      <th class="w-40">LP</th>
+      <th class="w-40">PP</th>
+      <th class="w-40">Výsledek</th>
+      <th class="w-24">Pořadí</th>`;
+  } else if (ACTIVE_MODE===MODE_RELAY){
+    h.innerHTML = `
+      <th class="w-20">Start. č.</th>
+      <th class="w-64">Tým</th>
+      <th class="w-24">OOC</th>
+      <th class="w-40">1. pokus</th>
+      <th class="w-40">2. pokus</th>
+      <th class="w-40">Výsledek</th>
+      <th class="w-24">Pořadí</th>`;
+  } else {
+    h.innerHTML = `
+      <th class="w-20">Start. č.</th>
+      <th class="w-64">Tým</th>
+      <th class="w-24">OOC</th>
+      <th class="w-40">Pořadí útok</th>
+      <th class="w-40">Pořadí štafeta</th>
+      <th class="w-40">Součet</th>
+      <th class="w-24">Celkové pořadí</th>`;
+  }
+}
+
+// ===== veřejné API – načtení kategorií =====
 async function loadResultsCategories() {
-  const competitionId = localStorage.getItem('selectedCompetitionId');
-  if (!competitionId) return;
+  const competitionId = cid(); if (!competitionId) return;
+  const comp = window.allCompetitions?.find(c => c.id == competitionId); if (!comp) return;
 
-  const comp = window.allCompetitions?.find(c => c.id == competitionId);
-  if (!comp) return;
-
-  const discipline = comp.type; // 'Požární útok' | 'Běh'
-  const categories = await window.electron.invoke('getCategories', discipline);
-
+  const categories = await window.electron.invoke('getCategories', comp.type);
   const sel = document.getElementById('resultsCategorySelect');
-  if (!sel) return;
-
   sel.innerHTML = `<option value="">Vyber kategorii</option>`;
   categories.forEach(cat => {
     const opt = document.createElement('option');
@@ -1868,134 +1918,412 @@ async function loadResultsCategories() {
     sel.appendChild(opt);
   });
 
-  sel.addEventListener('change', async (e) => {
-    const categoryId = e.target.value;
-    if (!categoryId) {
-      document.getElementById('resultsRows').innerHTML = `
-        <tr id="resultsEmpty">
-          <td colspan="99" class="text-center py-8 text-slate-400">Zvol kategorii pro zobrazení výsledků.</td>
-        </tr>`;
-      return;
-    }
-    await renderResultsTable(competitionId, categoryId, discipline);
+  renderHead(); // default: Útok
+}
+
+// ===== veřejné API – listenery =====
+function attachResultsListeners() {
+  const sel = document.getElementById('resultsCategorySelect');
+  sel?.addEventListener('change', refreshResultsTable);
+
+  document.getElementById('tabAttack') ?.addEventListener('click', () => setActiveTab(MODE_ATTACK));
+  document.getElementById('tabRelay')  ?.addEventListener('click', () => setActiveTab(MODE_RELAY));
+  document.getElementById('tabOverall')?.addEventListener('click', () => setActiveTab(MODE_OVERALL));
+
+  // exporty – přidáme param mode + relayType
+  document.getElementById('exportResultsExcelBtn')?.addEventListener('click', async ()=>{
+    const categoryId = sel.value; if(!categoryId) return showToast('Vyber kategorii.', 'error');
+    const comp = window.allCompetitions.find(c => c.id == cid());
+    const cats = await window.electron.invoke('getCategories', comp.type);
+    const category = cats.find(cat => cat.id == categoryId);
+    await window.electron.invoke('exportResultsExcel', {
+      competitionId: cid(),
+      categoryId,
+      mode: ACTIVE_MODE,
+      relayType: await window.electron.invoke('relay:getType', { competitionId: cid() }),
+      competitionName: comp.name,
+      competitionDate: comp.date,
+      categoryName: category?.name
+    }).then(()=>showToast('Export Excel hotov.','success'))
+      .catch(()=>showToast('Export do Excelu selhal.','error'));
   });
 
-  document.getElementById('exportResultsExcelBtn')?.addEventListener('click', async () => {
-    const categoryId = sel.value;
-    if (!categoryId) return showToast('Vyber kategorii.', 'error');
+  document.getElementById('exportResultsPdfBtn')?.addEventListener('click', async ()=>{
+    const categoryId = sel.value; if(!categoryId) return showToast('Vyber kategorii.', 'error');
+    const comp = window.allCompetitions.find(c => c.id == cid());
+    const cats = await window.electron.invoke('getCategories', comp.type);
+    const category = cats.find(cat => cat.id == categoryId);
+    await window.electron.invoke('exportResultsPdf', {
+      competitionId: cid(),
+      categoryId,
+      mode: ACTIVE_MODE,
+      relayType: await window.electron.invoke('relay:getType', { competitionId: cid() }),
+      competition: comp,
+      categoryName: category?.name
+    }).then(()=>showToast('Export PDF hotov.','success'))
+      .catch(()=>showToast('Export do PDF selhal.','error'));
+  });
+}
 
-    const comp2 = window.allCompetitions.find(c => c.id == competitionId);
-    const cats2 = await window.electron.invoke('getCategories', comp2.type);
-    const category = cats2.find(cat => cat.id == categoryId);
+// ===== veřejné API – refresh/renderer =====
+async function refreshResultsTable() {
+  const categoryId = document.getElementById('resultsCategorySelect').value;
+  const tbody = document.getElementById('resultsRows');
+  if (!categoryId){
+    tbody.innerHTML = `<tr id="resultsEmpty"><td colspan="99" class="text-center py-8 text-slate-400">Zvol kategorii pro zobrazení.</td></tr>`;
+    return;
+  }
+  return renderResultsTable(categoryId, ACTIVE_MODE);
+}
 
-    try {
-      await window.electron.invoke('exportResultsExcel', {
-        competitionId,
-        categoryId,
-        discipline,
-        competitionName: comp2.name,
-        competitionDate: comp2.date,
-        categoryName: category?.name
-      });
-      showToast('Export výsledků do Excelu dokončen.', 'success');
-    } catch {
-      showToast('Export do Excelu selhal.', 'error');
-    }
+async function renderResultsTable(categoryId, mode) {
+  if (mode === MODE_ATTACK)  return renderAttack(categoryId);
+  if (mode === MODE_RELAY)   return renderRelay(categoryId);
+  return renderOverall(categoryId);
+}
+
+// ===== interní rendery =====
+async function renderAttack(categoryId){
+  const competitionId = cid();
+  const rows = await window.electron.invoke('getStartlist', competitionId, categoryId);
+
+  const data = rows.map(r=>{
+    const res = r.results?.[0] || {};
+    const final = nOrNull(res.final_time);
+    return {
+      id:r.id, start:r.start_number ?? '', team:r.team || `${r.name||''} ${r.surname||''}`.trim(),
+      lp:nOrNull(res.time_lp), pp:nOrNull(res.time_pp),
+      final: Number.isFinite(final) ? final : 999.999,
+      n: toBool(res.is_n),
+      ooc: toBool(r.out_of_competition)
+    };
+  }).sort((a,b)=>{
+    if (a.ooc!==b.ooc) return a.ooc?1:-1;
+    const at=(a.n||!Number.isFinite(a.final))?999.999:a.final;
+    const bt=(b.n||!Number.isFinite(b.final))?999.999:b.final;
+    return at-bt;
   });
 
-  document.getElementById('exportResultsPdfBtn')?.addEventListener('click', async () => {
-    const categoryId = sel.value;
-    if (!categoryId) return showToast('Vyber kategorii.', 'error');
+  // rank
+  let rank=0,last=null,idx=0; const rankMap=new Map();
+  for(const x of data){ idx++; const t=(x.n||x.ooc)?999.999:x.final;
+    if(t!==last){ if(t<999.999) rank=idx; last=t; } rankMap.set(x.id,t<999.999&&!x.ooc?rank:'—'); }
 
-    const comp2 = window.allCompetitions.find(c => c.id == competitionId);
-    const cats2 = await window.electron.invoke('getCategories', comp2.type);
-    const category = cats2.find(cat => cat.id == categoryId);
+  const tbody=document.getElementById('resultsRows'); tbody.innerHTML='';
+  for(const r of data){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td class="td-center">${r.start}</td>
+      <td>${r.team} ${r.ooc?'<span class="tag-ooc text-xs ml-2">MIMO</span>':''}</td>
+      <td class="td-center">
+        <label class="inline-flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" class="ooc-toggle" data-sid="${r.id}" ${r.ooc?'checked':''}/>
+          <span class="text-xs opacity-80">Mimo soutěž</span>
+        </label>
+      </td>
+      <td class="td-center">${fmt(r.lp)}</td>
+      <td class="td-center">${fmt(r.pp)}</td>
+      <td class="td-center ${r.n?'text-red-400 font-semibold':''}">${r.n?'—':fmt(r.final)}</td>
+      <td class="td-center font-semibold">${rankMap.get(r.id)}</td>`;
+    tbody.appendChild(tr);
+  }
 
-    try {
-      await window.electron.invoke('exportResultsPdf', {
-        competitionId,
-        categoryId,
-        discipline,
-        competition: comp2,
-        categoryName: category?.name
-      });
-      showToast('Export výsledků do PDF dokončen.', 'success');
-    } catch {
-      showToast('Export do PDF selhal.', 'error');
-    }
+  tbody.querySelectorAll('.ooc-toggle').forEach(ch=>{
+    ch.addEventListener('change', async ()=>{
+      await window.electron.invoke('startlist:setOOC', { startlist_id:Number(ch.dataset.sid), value: ch.checked?1:0 });
+      refreshResultsTable();
+    });
+  });
+}
+
+async function renderRelay(categoryId){
+  const competitionId = cid();
+  const relayType = await window.electron.invoke('relay:getType', { competitionId });
+  const rows  = await window.electron.invoke('relay:listRows', { competitionId, categoryId });
+  const start = await window.electron.invoke('getStartlist', competitionId, categoryId);
+  const oocMap = new Map(start.map(s=>[s.id, toBool(s.out_of_competition)]));
+
+  const data = rows.map(r=>({
+    id:r.startlist_id, start:r.start_number??'', team:r.team??'',
+    a1:nOrNull(r.attempt1_time), v1:r.attempt1_valid!==0,
+    a2:nOrNull(r.attempt2_time), v2:r.attempt2_valid!==0,
+    final:nOrNull(r.final_time), ooc:oocMap.get(r.startlist_id)||false
+  })).sort((a,b)=>{
+    if (a.ooc!==b.ooc) return a.ooc?1:-1;
+    const at=Number.isFinite(a.final)?a.final:999.999;
+    const bt=Number.isFinite(b.final)?b.final:999.999;
+    return at-bt;
+  });
+
+  let rank=0,last=null,idx=0; const rankMap=new Map();
+  for(const x of data){ idx++; const t=(x.ooc||!Number.isFinite(x.final))?999.999:x.final;
+    if(t!==last){ if(t<999.999) rank=idx; last=t; } rankMap.set(x.id,t<999.999&&!x.ooc?rank:'—'); }
+
+  const tbody=document.getElementById('resultsRows'); tbody.innerHTML='';
+  for(const r of data){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td class="td-center">${r.start}</td>
+      <td>${r.team} ${r.ooc?'<span class="tag-ooc text-xs ml-2">MIMO</span>':''}</td>
+      <td class="td-center">
+        <label class="inline-flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" class="ooc-toggle" data-sid="${r.id}" ${r.ooc?'checked':''}/>
+          <span class="text-xs opacity-80">Mimo soutěž</span>
+        </label>
+      </td>
+      <td class="td-center">${r.v1?fmt(r.a1):'—'}</td>
+      <td class="td-center">${r.v2?fmt(r.a2):'—'}</td>
+      <td class="td-center ${Number.isFinite(r.final)?'':'text-red-400 font-semibold'}">${Number.isFinite(r.final)?fmt(r.final):'—'}</td>
+      <td class="td-center font-semibold">${rankMap.get(r.id)}</td>`;
+    tbody.appendChild(tr);
+  }
+
+  document.getElementById('tabRelay').innerText = relayType==='4x60' ? 'Štafeta 4×60' : 'Štafeta dvojic';
+
+  tbody.querySelectorAll('.ooc-toggle').forEach(ch=>{
+    ch.addEventListener('change', async ()=>{
+      await window.electron.invoke('startlist:setOOC', { startlist_id:Number(ch.dataset.sid), value: ch.checked?1:0 });
+      refreshResultsTable();
+    });
+  });
+}
+
+async function renderOverall(categoryId){
+  const competitionId = cid();
+  const startRows = await window.electron.invoke('getStartlist', competitionId, categoryId);
+
+  // Útok – pořadí
+  const a = startRows.map(r=>{
+    const res=r.results?.[0]||{};
+    const fin=nOrNull(res.final_time);
+    return {id:r.id,ooc:toBool(r.out_of_competition),key:(toBool(res.is_n)||!Number.isFinite(fin))?999.999:fin};
+  }).sort((x,y)=> (x.ooc!==y.ooc)?(x.ooc?1:-1):x.key-y.key);
+  let rk=0,last=null,idx=0; const aRank=new Map();
+  for(const x of a){ idx++; if(x.ooc||x.key>=999.999){aRank.set(x.id,null);continue;}
+    if(x.key!==last){rk=idx;last=x.key;} aRank.set(x.id,rk); }
+
+  // Štafeta – pořadí
+  const relayRows = await window.electron.invoke('relay:listRows', { competitionId, categoryId });
+  const rel = relayRows.map(r=>{
+    const t=nOrNull(r.final_time);
+    return {id:r.startlist_id,ooc:toBool(startRows.find(s=>s.id===r.startlist_id)?.out_of_competition),key:Number.isFinite(t)?t:999.999};
+  }).sort((x,y)=> (x.ooc!==y.ooc)?(x.ooc?1:-1):x.key-y.key);
+  rk=0; last=null; idx=0; const rRank=new Map();
+  for(const x of rel){ idx++; if(x.ooc||x.key>=999.999){rRank.set(x.id,null);continue;}
+    if(x.key!==last){rk=idx;last=x.key;} rRank.set(x.id,rk); }
+
+  const maxRank = Math.max(...[...aRank.values(),...rRank.values()].filter(Boolean),0) || 0;
+
+  const rows = startRows.map(s=>{
+    const A=aRank.get(s.id), R=rRank.get(s.id), O=toBool(s.out_of_competition);
+    const sum = O ? Infinity : ((A??(maxRank+1)) + (R??(maxRank+1)));
+    return {
+      id:s.id, start:s.start_number??'', team:s.team || `${s.name||''} ${s.surname||''}`.trim(),
+      ooc:O, aPlace:A??'—', rPlace:R??'—', sum
+    };
+  }).sort((x,y)=> (x.ooc!==y.ooc)?(x.ooc?1:-1):(x.sum - y.sum));
+
+  let place=0,i=0,lastSum=null;
+  const tbody=document.getElementById('resultsRows'); tbody.innerHTML='';
+  for(const r of rows){
+    i++; let overall='—';
+    if(!r.ooc && Number.isFinite(r.sum)){ if(r.sum!==lastSum){place=i;lastSum=r.sum;} overall=place; }
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td class="td-center">${r.start}</td>
+      <td>${r.team} ${r.ooc?'<span class="tag-ooc text-xs ml-2">MIMO</span>':''}</td>
+      <td class="td-center">
+        <label class="inline-flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" class="ooc-toggle" data-sid="${r.id}" ${r.ooc?'checked':''}/>
+          <span class="text-xs opacity-80">Mimo soutěž</span>
+        </label>
+      </td>
+      <td class="td-center">${r.aPlace}</td>
+      <td class="td-center">${r.rPlace}</td>
+      <td class="td-center">${Number.isFinite(r.sum)?r.sum:'—'}</td>
+      <td class="td-center font-semibold">${overall}</td>`;
+    tbody.appendChild(tr);
+  }
+
+  tbody.querySelectorAll('.ooc-toggle').forEach(ch=>{
+    ch.addEventListener('change', async ()=>{
+      await window.electron.invoke('startlist:setOOC', { startlist_id:Number(ch.dataset.sid), value: ch.checked?1:0 });
+      refreshResultsTable();
+    });
   });
 }
 
 
-async function renderResultsTable(competitionId, categoryId, discipline) {
+function getCompetitionId(){ return localStorage.getItem('selectedCompetitionId'); }
+function fmtTime(v){ if(v==null) return ''; const n=Number(v); return (isFinite(n)&&n<999.999)?n.toFixed(2):'999.999'; }
+function isGood(v){ return isFinite(v)&&Number(v)<999.999; }
+
+async function ensureRelayTypeChosen(){
+  const cid = getCompetitionId();
+  const type = await window.electron.invoke('relay:getType', { competitionId: cid });
+  if (type) return;
+
+  const modal = document.getElementById('relayTypeModal');
+  modal.classList.remove('hidden');
+
+  const choose = async (t) => {
+    await window.electron.invoke('relay:setType', { competitionId: cid, type: t });
+    modal.classList.add('hidden');
+  };
+  document.getElementById('choose4x60')?.addEventListener('click', ()=>choose('4x60'), {once:true});
+  document.getElementById('choosePairs')?.addEventListener('click', ()=>choose('pairs'), {once:true});
+
+  await new Promise(res=>{
+    const obs=new MutationObserver(()=>{ if(modal.classList.contains('hidden')){obs.disconnect();res();} });
+    obs.observe(modal,{attributes:true,attributeFilter:['class']});
+  });
+}
+
+async function refreshRelayTable(){
+  const categoryId = document.getElementById('resultsCategorySelect').value;
+  const cid = localStorage.getItem('selectedCompetitionId');
   const tbody = document.getElementById('resultsRows');
-  const thead = document.getElementById('resultsHead');
-  if (!tbody || !thead) return;
+  const empty = document.getElementById('resultsEmpty');
 
-  const rows = await window.electron.invoke('getStartlist', competitionId, categoryId);
-  const toBool = v => v === true || v === 1 || v === '1' || v === 'true';
-  const norm = v => (v == null || v === '' ? null : Number(v));
+  if (!categoryId){ tbody.innerHTML=''; tbody.appendChild(empty); return; }
 
-  const data = rows.map(r => {
-    const res = r.results?.[0] || {};
-    const lp = norm(res.time_lp);
-    const pp = norm(res.time_pp);
-
-    // finální čas vždy ber z DB (fallback -> 999.999)
-    let final = norm(res.final_time);
-    if (!Number.isFinite(final)) final = 999.999;
-
-    // N: u útoku čistě podle res.is_n; jinde (běh) ber buď res.is_n nebo final >= 999.999
-    const isN = discipline === 'Požární útok'
-      ? toBool(res.is_n)
-      : (toBool(res.is_n) || (Number.isFinite(final) && final >= 999.999));
-
-    return {
-      id: r.id,
-      start: r.start_number ?? '',
-      name: r.name,
-      surname: r.surname,
-      team: r.team,
-      lp, pp, isN, final
-    };
-  });
-
-  // seřadit: menší final dřív, 999.999 (N/DNF) na konec
-  data.sort((a, b) => a.final - b.final);
-
-  // pořadí (tie = sdílené)
-  let place = 0, lastTime = null, idx = 0;
-  data.forEach(row => {
-    idx++;
-    if (row.final !== lastTime) {
-      place = idx;
-      lastTime = row.final;
-    }
-    row.place = Number.isFinite(row.final) && row.final < 999.999 ? place : '—';
-  });
-
-  // render
+  const data = await window.electron.invoke('relay:listRows', { competitionId: cid, categoryId });
   tbody.innerHTML = '';
-  if (!data.length) {
-    tbody.innerHTML = `
-      <tr id="resultsEmpty">
-        <td colspan="99" class="text-center py-8 text-slate-400">Žádné záznamy.</td>
-      </tr>`;
+
+  if (!data?.length){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td colspan="99" class="text-center py-8 text-slate-400">V této kategorii není startovka.</td>`;
+    tbody.appendChild(tr);
     return;
   }
 
-  for (const r of data) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td class="text-center">${r.start}</td>
-      <td>
-        ${r.team ? `<span class="font-semibold">${r.team}</span>` : `${r.name || ''} ${r.surname || ''}`}
-      </td>
-      <td class="text-center">${Number.isFinite(r.lp) ? r.lp.toFixed(2) : '—'}</td>
-      <td class="text-center">${Number.isFinite(r.pp) ? r.pp.toFixed(2) : '—'}</td>
-      <td class="text-center ${toBool(r.isN) ? 'text-red-400 font-semibold' : ''}">${Number.isFinite(r.final) && r.final < 999.999 ? r.final.toFixed(2) : '—'}</td>
-      <td class="text-center font-semibold">${r.place}</td>
+  for (const r of data){
+    const validBtn = (sid, attempt, valid) => `
+      <div class="flex justify-center">
+        <button
+          class="validity-toggle-relay px-3 py-1 rounded text-white text-sm transition
+            ${valid ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}"
+          data-sid="${sid}"
+          data-attempt="${attempt}"
+          data-valid="${valid ? '1':'0'}"
+        >
+          ${valid ? '✅ PLATNÝ' : '❌ NEPLATNÝ'}
+        </button>
+      </div>`;
+
+    // 1. řádek – nese Start, Tým i Výsledek
+    const tr1=document.createElement('tr');
+    tr1.innerHTML=`
+      <td class="td-center">${r.start_number ?? ''}</td>
+      <td><span class="font-semibold">${r.team ?? ''}</span></td>
+      <td>1. pokus</td>
+      <td class="editable td-right" data-sid="${r.startlist_id}" data-attempt="1" contenteditable="true">${fmtTime(r.attempt1_time)}</td>
+      <td class="td-center">${validBtn(r.startlist_id, 1, r.attempt1_valid !== 0)}</td>
+      <td class="${isGood(r.final_time)?'':'text-red-400 font-semibold'} td-center">${fmtTime(r.final_time)}</td>
     `;
-    tbody.appendChild(tr);
+
+    // 2. řádek – Start/Tým/Výsledek neukazujeme (neopakovat)
+    const tr2=document.createElement('tr');
+    tr2.innerHTML=`
+      <td></td>
+      <td></td>
+      <td>2. pokus</td>
+      <td class="editable td-right" data-sid="${r.startlist_id}" data-attempt="2" contenteditable="true">${fmtTime(r.attempt2_time)}</td>
+      <td class="td-center">${validBtn(r.startlist_id, 2, r.attempt2_valid !== 0)}</td>
+      <td></td>
+    `;
+
+    tbody.appendChild(tr1);
+    tbody.appendChild(tr2);
   }
+
+  // Uložení času – NEŘEŠÍ platnost, pouze zapisuje hodnotu
+  tbody.querySelectorAll('.editable').forEach(td=>{
+    td.addEventListener('blur', async ()=>{
+      const sid = Number(td.dataset.sid);
+      const attempt = Number(td.dataset.attempt);
+      const raw = (td.innerText||'').trim().replace(',', '.');
+      const time = Number.isFinite(Number(raw)) ? Number(raw) : null;
+
+      // platnost necháme jak je (z tlačítka)
+      const btn = tbody.querySelector(`.validity-toggle-relay[data-sid="${sid}"][data-attempt="${attempt}"]`);
+      const valid = btn?.dataset.valid === '1';
+
+      const cid = localStorage.getItem('selectedCompetitionId');
+      const discipline = await window.electron.invoke('relay:getType', { competitionId: cid });
+      await window.electron.invoke('relay:savePartial', { startlist_id: sid, discipline, attempt, time, valid });
+      await refreshRelayTable();
+    });
+  });
+
+  // Přepínání platnosti – čas ponechán, jen uložíme flag
+  tbody.querySelectorAll('.validity-toggle-relay').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const sid = Number(btn.dataset.sid);
+      const attempt = Number(btn.dataset.attempt);
+      const nowValid = btn.dataset.valid !== '1';
+      btn.dataset.valid = nowValid ? '1' : '0';
+      btn.classList.toggle('bg-green-600', nowValid);
+      btn.classList.toggle('hover:bg-green-700', nowValid);
+      btn.classList.toggle('bg-red-600', !nowValid);
+      btn.classList.toggle('hover:bg-red-700', !nowValid);
+      btn.innerText = nowValid ? '✅ PLATNÝ' : '❌ NEPLATNÝ';
+
+      // přečti aktuální čas z buňky (bez zásahů)
+      const td = tbody.querySelector(`.editable[data-sid="${sid}"][data-attempt="${attempt}"]`);
+      const raw = (td?.innerText||'').trim().replace(',', '.');
+      const time = Number.isFinite(Number(raw)) ? Number(raw) : null;
+
+      const cid = localStorage.getItem('selectedCompetitionId');
+      const discipline = await window.electron.invoke('relay:getType', { competitionId: cid });
+      await window.electron.invoke('relay:savePartial', { startlist_id: sid, discipline, attempt, time, valid: nowValid });
+      await refreshRelayTable();
+    });
+  });
+}
+
+async function loadRelayCategories() {
+  await ensureRelayTypeChosen();
+
+  const cid = localStorage.getItem('selectedCompetitionId');
+  const comp = window.allCompetitions?.find(c => c.id == cid);
+  if (!comp) return;
+
+  const cats = await window.electron.invoke('getCategories', comp.type);
+  const sel = document.getElementById('resultsCategorySelect');
+  sel.innerHTML = `<option value="">Vyber kategorii</option>`;
+  cats.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.name;
+    sel.appendChild(opt);
+  });
+
+  await refreshRelayTable();
+}
+
+
+function attachRelayListeners() {
+  document.getElementById('resultsCategorySelect')
+    ?.addEventListener('change', refreshRelayTable);
+
+  const btnChange = document.getElementById('relayTypeChangeBtn');
+  const changeModal = document.getElementById('relayTypeChangeModal');
+  const step2 = document.getElementById('relayChangeStep2');
+
+  btnChange?.addEventListener('click', ()=>{
+    changeModal.classList.remove('hidden');
+    step2.classList.add('hidden');
+  });
+  document.getElementById('relayChangeCancel1')?.addEventListener('click', ()=> changeModal.classList.add('hidden'));
+  document.getElementById('relayChangeCancel2')?.addEventListener('click', ()=> changeModal.classList.add('hidden'));
+  document.getElementById('relayChangeConfirm1')?.addEventListener('click', ()=> step2.classList.remove('hidden'));
+  document.getElementById('relayChangeConfirm2')?.addEventListener('click', async ()=>{
+    const cid = localStorage.getItem('selectedCompetitionId');
+    const curr = await window.electron.invoke('relay:getType', { competitionId: cid });
+    const next = curr === '4x60' ? 'pairs' : '4x60';
+    await window.electron.invoke('relay:setType', { competitionId: cid, type: next });
+    changeModal.classList.add('hidden');
+    await refreshRelayTable();
+  });
 }
