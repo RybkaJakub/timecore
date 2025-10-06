@@ -1,4 +1,4 @@
-const {app, BrowserWindow, ipcMain, dialog, screen} = require('electron');
+const {app, BrowserWindow, ipcMain, dialog, screen, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const csvParse = require('csv-parse/sync');
@@ -112,10 +112,11 @@ ipcMain.on('quit-app', () => {
 
 function createSplashWindow() {
     splashWindow = new BrowserWindow({
-        width: 500,
-        height: 300,
+        width: 640,
+        height: 200,
         frame: false,
         transparent: true,
+        backgroundColor: '#00000000',
         alwaysOnTop: true,
         resizable: false,
         icon: path.join(__dirname, 'src', 'assets', 'logo.png'),
@@ -134,7 +135,7 @@ function createSplashWindow() {
         const ok = store.get('license_valid') === true;
         if (ok) createMainWindow();
         else createLicenseWindow();
-    }, 3000);
+    }, 5500);
 }
 
 function createLicenseWindow() {
@@ -1613,3 +1614,14 @@ ipcMain.handle('startlist:setOOC', async (_e, { startlist_id, value }) => {
   await runP(`UPDATE startlist SET out_of_competition = ? WHERE id = ?`, [value ? 1 : 0, startlist_id]);
   return true;
 });
+
+ipcMain.handle('theme:get', () => store.get('theme') || 'system');
+ipcMain.handle('theme:set', (_e, mode) => {
+  const m = (mode === 'dark' || mode === 'light') ? mode : 'system';
+  store.set('theme', m);
+  nativeTheme.themeSource = m; // když používáš i nativní prvky
+  return m;
+});
+
+// při startu appky:
+nativeTheme.themeSource = store.get('theme') || 'system';

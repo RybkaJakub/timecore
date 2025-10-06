@@ -21,3 +21,9 @@ contextBridge.exposeInMainWorld('api', {
   closeWindow: () => ipcRenderer.send('window-close'),
   minimizeWindow: () => ipcRenderer.send('window-minimize'),
 });
+
+
+contextBridge.exposeInMainWorld('theme', {
+  get: () => ipcRenderer.invoke('theme:get'),
+  set: (mode) => ipcRenderer.invoke('theme:set', mode), // 'dark' | 'light' | 'system'
+});

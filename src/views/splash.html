@@ -3,34 +3,135 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+  <!-- TÉMA DŘÍV NEŽ CSS (žádný FOUC) -->
+  <script>
+    (function () {
+      try {
+        const KEY = 'tc_theme';
+        const saved = localStorage.getItem(KEY);
+        const sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        const mode = saved || sys;
+        if (mode === 'dark') document.documentElement.classList.add('dark');
+        document.documentElement.dataset.theme = mode;
+      } catch (_) {}
+    })();
+  </script>
+
   <link href="../output.css" rel="stylesheet">
-  <title>Načítání</title>
+  <title>TimeCore – Načítání</title>
+  <style>
+    .tw-bar-fill{
+      background-image: linear-gradient(90deg, rgba(255,255,255,.35) 0, rgba(255,255,255,0) 60%);
+      background-repeat: no-repeat;
+      background-size: 28% 100%;
+      animation: twShimmer 1.4s linear infinite;
+    }
+    @keyframes twShimmer{ 0%{background-position-x:-30%} 100%{background-position-x:130%} }
+  </style>
 </head>
-<body class="bg-gradient-to-br from-gray-800 to-gray-900 flex justify-center items-center min-h-screen text-gray-200 relative">
 
-  <div class="flex flex-col items-center space-y-6">
-    <!-- Logo -->
-    <img
-      src="../assets/logo.png"
-      alt="Logo"
-      class="h-24 brightness-125 drop-shadow-lg"
-    />
+<body class="min-h-screen w-screen overflow-hidden flex items-center justify-center
+             bg-slate-50 text-slate-800 transition-colors duration-200
+             dark:bg-slate-950 dark:text-slate-200">
 
-    <!-- Loading text -->
-    <p class="text-lg font-medium tracking-wide text-primary">
-      Načítám aplikaci…
-    </p>
+  <!-- PANEL (hranatý, bez „karty/blur“) -->
+  <div class="w-full max-w-2xl p-8 border border-slate-200 bg-white
+              dark:bg-slate-900 dark:border-slate-800">
 
-    <!-- Progress Bar -->
-    <div class="w-64 h-3 bg-gray-700 rounded-full overflow-hidden shadow-inner">
-      <div class="h-full bg-primary animate-loading rounded-full"></div>
+    <!-- header -->
+    <div class="flex items-center justify-between mb-6">
+      <div class="flex items-center gap-3">
+        <img src="../assets/logo.png" alt="TimeCore" class="h-10 w-10"/>
+        <div>
+          <h1 class="text-xl font-semibold">TimeCore</h1>
+          <p class="text-sm text-slate-500 dark:text-slate-400">Připravuji prostředí aplikace…</p>
+        </div>
+      </div>
+
+      <!-- přepínač -->
+      <button id="themeToggle"
+        class="h-6 w-12 flex items-center rounded-full border border-slate-300
+               bg-slate-200 px-1 transition
+               dark:border-slate-700 dark:bg-slate-700">
+        <div id="switchKnob"
+             class="h-4 w-4 rounded-full bg-slate-900 dark:bg-white transition-transform"></div>
+      </button>
+    </div>
+
+    <!-- progress -->
+    <div class="space-y-2.5">
+      <div class="relative w-full h-2.5 bg-slate-200 dark:bg-slate-800 overflow-hidden">
+        <div id="barFill"
+             class="h-full w-0 bg-orange-500 tw-bar-fill transition-[width] duration-300 ease-out"></div>
+      </div>
+      <div class="flex justify-between text-xs text-slate-500 dark:text-slate-400">
+        <span id="statusLabel">Inicializace modulů…</span>
+        <span id="percentLabel">0%</span>
+      </div>
+    </div>
+
+    <!-- meta -->
+    <div class="mt-5 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+      <span>Verze 2.0</span>
+      <span>Načítání…</span>
     </div>
   </div>
 
-  <!-- Verze dole -->
-  <p class="absolute bottom-4 text-xs text-gray-400 text-center w-full">
-    Verze 1.0 – BETA
-  </p>
+  <script>
+    // === LIGHT/DARK ===
+    (function (){
+      const KEY = 'tc_theme';
+      const root = document.documentElement;
+      const knob = document.getElementById('switchKnob');
+      const btn  = document.getElementById('themeToggle');
 
+      function apply(mode){
+        const dark = mode === 'dark';
+        root.classList.toggle('dark', dark);
+        knob.style.transform = dark ? 'translateX(24px)' : 'translateX(0)';
+        root.dataset.theme = mode;
+        try { localStorage.setItem(KEY, mode); } catch {}
+        // volitelně: sync do mainu (pokud používáš níže uvedené IPC)
+        window.theme?.set?.(mode);
+      }
+
+      // start – přečti to, co jsme nastavili v <head>
+      apply(root.dataset.theme === 'dark' ? 'dark' : 'light');
+
+      btn.addEventListener('click', () => {
+        apply(root.classList.contains('dark') ? 'light' : 'dark');
+      });
+    })();
+
+    // === PROGRESS ===
+    const bar = document.getElementById('barFill');
+    const pct = document.getElementById('percentLabel');
+    const lbl = document.getElementById('statusLabel');
+
+    function applyProgress(value, text){
+      const v = Math.max(0, Math.min(100, Number(value) || 0));
+      bar.style.width = v + '%';
+      pct.textContent = v + '%';
+      if (text) lbl.textContent = text;
+      if (v >= 100){
+        document.body.style.transition = 'opacity .35s ease';
+        document.body.style.opacity = '0';
+      }
+    }
+
+    if (window.splash && typeof window.splash.onProgress === 'function') {
+      window.splash.onProgress(({ v, text }) => applyProgress(v, text));
+    } else {
+      // fallback pro dev
+      let d = 0, i = setInterval(()=>{
+        d += Math.ceil(Math.random()*7);
+        if (d > 100) d = 100;
+        const steps = ['Inicializace modulů…','Kontrola licence…','Načítání databáze…','Připojení k časomíře…','Příprava UI…'];
+        applyProgress(d, steps[Math.min(steps.length-1, Math.floor(d/25))]);
+        if (d === 100) clearInterval(i);
+      }, 220);
+    }
+  </script>
 </body>
 </html>
